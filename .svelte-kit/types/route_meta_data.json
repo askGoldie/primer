@@ -1,0 +1,198 @@
+{
+	"/": [
+		"src/routes/+page.server.ts",
+		"src/routes/+layout.ts",
+		"src/routes/+layout.server.ts",
+		"src/routes/+layout.ts",
+		"src/routes/+layout.server.ts"
+	],
+	"/api/download": [
+		"src/routes/api/download/+server.ts"
+	],
+	"/api/export/admin-nodes": [
+		"src/routes/api/export/admin-nodes/+server.ts"
+	],
+	"/api/export/goals-pdf": [
+		"src/routes/api/export/goals-pdf/+server.ts"
+	],
+	"/api/export/performance-logs": [
+		"src/routes/api/export/performance-logs/+server.ts"
+	],
+	"/api/export/snapshots": [
+		"src/routes/api/export/snapshots/+server.ts"
+	],
+	"/app": [
+		"src/routes/app/+page.server.ts",
+		"src/routes/app/+layout.server.ts",
+		"src/routes/+layout.ts",
+		"src/routes/+layout.server.ts",
+		"src/routes/app/+layout.server.ts",
+		"src/routes/+layout.ts",
+		"src/routes/+layout.server.ts"
+	],
+	"/app/admin": [
+		"src/routes/app/admin/+page.server.ts",
+		"src/routes/app/+layout.server.ts",
+		"src/routes/+layout.ts",
+		"src/routes/+layout.server.ts"
+	],
+	"/app/admin/audit": [
+		"src/routes/app/admin/audit/+page.server.ts",
+		"src/routes/app/+layout.server.ts",
+		"src/routes/+layout.ts",
+		"src/routes/+layout.server.ts"
+	],
+	"/app/api/audit-export": [
+		"src/routes/app/api/audit-export/+server.ts"
+	],
+	"/app/api/placement-request": [
+		"src/routes/app/api/placement-request/+server.ts"
+	],
+	"/app/goals": [
+		"src/routes/app/goals/+page.server.ts",
+		"src/routes/app/+layout.server.ts",
+		"src/routes/+layout.ts",
+		"src/routes/+layout.server.ts"
+	],
+	"/app/inquiries": [
+		"src/routes/app/inquiries/+page.server.ts",
+		"src/routes/app/+layout.server.ts",
+		"src/routes/+layout.ts",
+		"src/routes/+layout.server.ts"
+	],
+	"/app/inquiries/new": [
+		"src/routes/app/inquiries/new/+page.server.ts",
+		"src/routes/app/+layout.server.ts",
+		"src/routes/+layout.ts",
+		"src/routes/+layout.server.ts"
+	],
+	"/app/inquiries/[id]": [
+		"src/routes/app/inquiries/[id]/+page.server.ts",
+		"src/routes/app/+layout.server.ts",
+		"src/routes/+layout.ts",
+		"src/routes/+layout.server.ts"
+	],
+	"/app/leaders": [
+		"src/routes/app/leaders/+page.server.ts",
+		"src/routes/app/+layout.server.ts",
+		"src/routes/+layout.ts",
+		"src/routes/+layout.server.ts"
+	],
+	"/app/leaders/[id]": [
+		"src/routes/app/leaders/[id]/+page.server.ts",
+		"src/routes/app/+layout.server.ts",
+		"src/routes/+layout.ts",
+		"src/routes/+layout.server.ts"
+	],
+	"/app/onboarding": [
+		"src/routes/app/onboarding/+page.server.ts",
+		"src/routes/app/+layout.server.ts",
+		"src/routes/+layout.ts",
+		"src/routes/+layout.server.ts"
+	],
+	"/app/peers": [
+		"src/routes/app/peers/+page.server.ts",
+		"src/routes/app/+layout.server.ts",
+		"src/routes/+layout.ts",
+		"src/routes/+layout.server.ts"
+	],
+	"/app/performance": [
+		"src/routes/app/performance/+page.server.ts",
+		"src/routes/app/+layout.server.ts",
+		"src/routes/+layout.ts",
+		"src/routes/+layout.server.ts"
+	],
+	"/app/reports": [
+		"src/routes/app/reports/+page.server.ts",
+		"src/routes/app/+layout.server.ts",
+		"src/routes/+layout.ts",
+		"src/routes/+layout.server.ts"
+	],
+	"/app/settings": [
+		"src/routes/app/settings/+page.server.ts",
+		"src/routes/app/+layout.server.ts",
+		"src/routes/+layout.ts",
+		"src/routes/+layout.server.ts"
+	],
+	"/app/settings/audit-log": [
+		"src/routes/app/settings/audit-log/+page.server.ts",
+		"src/routes/app/+layout.server.ts",
+		"src/routes/+layout.ts",
+		"src/routes/+layout.server.ts"
+	],
+	"/app/setup": [
+		"src/routes/app/setup/+page.server.ts",
+		"src/routes/app/+layout.server.ts",
+		"src/routes/+layout.ts",
+		"src/routes/+layout.server.ts"
+	],
+	"/app/stack": [
+		"src/routes/app/stack/+page.server.ts",
+		"src/routes/app/+layout.server.ts",
+		"src/routes/+layout.ts",
+		"src/routes/+layout.server.ts"
+	],
+	"/app/team": [
+		"src/routes/app/team/+page.server.ts",
+		"src/routes/app/+layout.server.ts",
+		"src/routes/+layout.ts",
+		"src/routes/+layout.server.ts"
+	],
+	"/app/visibility": [
+		"src/routes/app/visibility/+page.server.ts",
+		"src/routes/app/+layout.server.ts",
+		"src/routes/+layout.ts",
+		"src/routes/+layout.server.ts"
+	],
+	"/auth/callback": [
+		"src/routes/auth/callback/+server.ts"
+	],
+	"/auth/forgot-password": [
+		"src/routes/auth/forgot-password/+page.server.ts",
+		"src/routes/+layout.ts",
+		"src/routes/+layout.server.ts"
+	],
+	"/auth/login": [
+		"src/routes/auth/login/+page.server.ts",
+		"src/routes/+layout.ts",
+		"src/routes/+layout.server.ts"
+	],
+	"/auth/logout": [
+		"src/routes/auth/logout/+page.server.ts",
+		"src/routes/+layout.ts",
+		"src/routes/+layout.server.ts"
+	],
+	"/auth/register": [
+		"src/routes/auth/register/+page.server.ts",
+		"src/routes/+layout.ts",
+		"src/routes/+layout.server.ts"
+	],
+	"/auth/reset-password": [
+		"src/routes/auth/reset-password/+page.server.ts",
+		"src/routes/+layout.ts",
+		"src/routes/+layout.server.ts"
+	],
+	"/auth/verify-email": [
+		"src/routes/auth/verify-email/+page.server.ts",
+		"src/routes/+layout.ts",
+		"src/routes/+layout.server.ts"
+	],
+	"/auth/verify-email/resend": [
+		"src/routes/auth/verify-email/resend/+page.server.ts",
+		"src/routes/+layout.ts",
+		"src/routes/+layout.server.ts"
+	],
+	"/favicon.ico": [
+		"src/routes/favicon.ico/+server.ts"
+	],
+	"/login": [
+		"src/routes/login/+page.server.ts",
+		"src/routes/+layout.ts",
+		"src/routes/+layout.server.ts"
+	],
+	"/platform": [
+		"src/routes/platform/+page.server.ts",
+		"src/routes/+layout.ts",
+		"src/routes/+layout.server.ts"
+	]
+}

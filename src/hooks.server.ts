@@ -18,7 +18,6 @@
  * 3. handleGuards    — Centralised route protection. More reliable than
  *    per-page guards because it runs before any load function.
  *    - /platform requires Supabase authentication (not just any session).
- *    - /web/admin requires isAdmin.
  */
 
 import { redirect, type Handle } from '@sveltejs/kit';
@@ -253,28 +252,12 @@ const handleAuth: Handle = async ({ event, resolve }) => {
 const handleGuards: Handle = async ({ event, resolve }) => {
 	const path = event.url.pathname;
 
-	// Legacy URL redirects. Both `/web/for-consultants` and
-	// `/web/problem/personas` were consolidated into `/web/for-partners`,
-	// which uses a persona toggle to show only the audience-specific
-	// narrative a visitor cares about. Permanent (301) redirects preserve
-	// any inbound links and search-engine equity the old URLs accumulated.
-	if (path === '/web/for-consultants' || path === '/web/problem/personas') {
-		redirect(301, '/web/for-partners');
-	}
-
 	// /platform requires a real Supabase login — not just any locals.user.
 	// A primer_perspective cookie sets locals.user too, but isSupabaseAuthenticated
 	// is only true when the Supabase JWT was validated.
 	if (path.startsWith('/platform')) {
 		if (!event.locals.isSupabaseAuthenticated) {
-			redirect(302, `/web/login?redirect=${encodeURIComponent(path)}`);
-		}
-	}
-
-	// /web/admin requires the isAdmin flag
-	if (path.startsWith('/web/admin')) {
-		if (!event.locals.isAdmin) {
-			redirect(302, '/');
+			redirect(302, `/login?redirect=${encodeURIComponent(path)}`);
 		}
 	}
 
