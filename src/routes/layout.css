@@ -1,0 +1,656 @@
+/**
+ * Global Styles for Primer
+ *
+ * Uses Tailwind CSS v4 with custom theme tokens from the style guide.
+ * @see /docs/tier-style-guide.md
+ */
+
+@import 'tailwindcss';
+@plugin '@tailwindcss/forms';
+@plugin '@tailwindcss/typography';
+
+/**
+ * Self-hosted font faces
+ * Eliminates render-blocking requests to fonts.googleapis.com.
+ * Only the weights actually used in the design system are included.
+ */
+@font-face {
+	font-family: 'Inter';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url('/fonts/inter/inter-latin-400.woff2') format('woff2');
+}
+
+@font-face {
+	font-family: 'Inter';
+	font-style: normal;
+	font-weight: 500;
+	font-display: swap;
+	src: url('/fonts/inter/inter-latin-500.woff2') format('woff2');
+}
+
+@font-face {
+	font-family: 'Inter';
+	font-style: normal;
+	font-weight: 600;
+	font-display: swap;
+	src: url('/fonts/inter/inter-latin-600.woff2') format('woff2');
+}
+
+@font-face {
+	font-family: 'JetBrains Mono';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url('/fonts/jetbrainsmoto/JetBrainsMono-Regular.woff2') format('woff2');
+}
+
+/**
+ * Custom theme tokens
+ * These map to the values in src/lib/config/theme.ts
+ */
+@theme {
+	/* Font families */
+	--font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+	--font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+	/* Light mode colors — canonical hyphenated names (bg-surface-light, etc.) */
+	--color-primary: #22201c;
+	--color-secondary: #5c5044;
+	--color-surface-light: #f2ede4;
+	--color-surface-mid: #ede6d9;
+	--color-surface-high: #e2d9ca;
+	--color-border: #c8bfb0;
+
+	/*
+	 * camelCase aliases — required because Tailwind v4 maps the CSS variable name
+	 * directly to the utility class. --color-surface-light → bg-surface-light.
+	 * Throughout this codebase bg-surfaceLight / bg-surfaceMid / bg-surfaceHigh
+	 * are used (camelCase), so we define matching variables for both conventions.
+	 */
+	--color-surface: #f2ede4; /* bg-surface  — page background level */
+	--color-surfaceLight: #f2ede4; /* bg-surfaceLight */
+	--color-surfaceMid: #ede6d9; /* bg-surfaceMid  — cards, panels */
+	--color-surfaceHigh: #e2d9ca; /* bg-surfaceHigh — elevated elements, hover targets */
+
+	/* Brand accents */
+	--color-accent1: #8b4e1e;
+	--color-accent1-light: #d4a882;
+	--color-accent2: #3d5a3e;
+	--color-accent2-light: #8fb890;
+	--color-accent3: #2c4a6e;
+	--color-accent3-light: #8aafd4;
+
+	/* Tier indicator colors (light mode) — all verified WCAG AA on surface-mid (#ede6d9) */
+	--color-tier-alarm: #b03a2e; /* 4.85:1 PASS */
+	--color-tier-concern: #7a4a00; /* 6.03:1 PASS */
+	--color-tier-content: #5f5750; /* 5.71:1 PASS — darkened from #6b6058 which was 4.92:1 but dropped to ~4.2:1 against tinted badge background (FAIL) */
+	--color-tier-effective: #245e91; /* 5.49:1 PASS — darkened from #2c6ea6 which was 4.35 (FAIL) */
+	--color-tier-optimized: #216639; /* 5.60:1 PASS — darkened from #2a7a45 which was 4.26 (FAIL) */
+}
+
+/**
+ * Base styles
+ */
+html {
+	font-family: var(--font-sans);
+	background-color: var(--color-surface-light);
+	color: var(--color-primary);
+}
+
+/**
+ * RTL support for Arabic
+ */
+[dir='rtl'] {
+	direction: rtl;
+}
+
+/**
+ * Focus styles
+ */
+:focus-visible {
+	outline: 2px solid var(--color-accent1);
+	outline-offset: 2px;
+}
+
+/**
+ * Selection styles
+ */
+::selection {
+	background-color: var(--color-accent1-light);
+	color: var(--color-primary);
+}
+
+/**
+ * Monospace text (scores, IDs)
+ */
+.font-mono {
+	font-family: var(--font-mono);
+	font-feature-settings: 'tnum' 1;
+}
+
+/**
+ * Tabular numbers — use on any numeric data column or score display.
+ * Prevents width shift when digits change and aligns columns cleanly.
+ */
+.tabular-nums {
+	font-variant-numeric: tabular-nums;
+	font-feature-settings: 'tnum' 1;
+}
+
+/**
+ * Typography classes per style guide
+ */
+.text-hero {
+	font-size: 28px;
+	font-weight: 500;
+	letter-spacing: -0.02em;
+}
+
+.text-page-heading {
+	font-size: 22px;
+	font-weight: 500;
+	letter-spacing: -0.01em;
+}
+
+.text-section-heading {
+	font-size: 18px;
+	font-weight: 500;
+}
+
+.text-label {
+	font-size: 14px;
+	font-weight: 500;
+}
+
+.text-body {
+	font-size: 14px;
+	font-weight: 400;
+}
+
+.text-secondary-text {
+	font-size: 12px;
+	font-weight: 400;
+}
+
+.text-eyebrow {
+	font-size: 12px;
+	font-weight: 500;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+}
+
+.text-mono-score {
+	font-family: var(--font-mono);
+	font-size: 11px;
+}
+
+/**
+ * Button contrast enforcement
+ *
+ * Claude (and LLMs in general) frequently generate buttons as <a> tags with
+ * bg-accent* classes but no explicit text color, relying on text-white to win.
+ * When `a { color }` is placed outside @layer base it overrides @layer utilities,
+ * making all <a>-based buttons show brown text on brown/green backgrounds.
+ *
+ * The @layer base fix above is the primary defense. These component classes are
+ * a secondary safety net: use them on any button-like element to guarantee
+ * correct foreground/background contrast without depending on utility ordering.
+ *
+ * Usage:
+ *   <a class="btn-primary" href="/demo">Start tour</a>
+ *   <button class="btn-secondary">Cancel</button>
+ *   <a class="btn-outline" href="/auth/register">Create account</a>
+ */
+@layer components {
+	.btn-primary {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.5rem;
+		padding: 0.5rem 1rem;
+		border-radius: 0.5rem;
+		font-size: 0.875rem;
+		font-weight: 500;
+		background-color: var(--color-accent1);
+		color: #ffffff !important; /* always white — never inherit accent1 from `a {}` */
+		text-decoration: none !important;
+		transition: background-color 150ms ease;
+	}
+	.btn-primary:hover {
+		background-color: color-mix(in srgb, var(--color-accent1) 90%, black);
+		text-decoration: none !important;
+	}
+
+	.btn-secondary {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.5rem;
+		padding: 0.5rem 1rem;
+		border-radius: 0.5rem;
+		font-size: 0.875rem;
+		font-weight: 500;
+		background-color: var(--color-surfaceMid);
+		color: var(--color-primary) !important;
+		border: 1px solid var(--color-border);
+		text-decoration: none !important;
+		transition: background-color 150ms ease;
+	}
+	.btn-secondary:hover {
+		background-color: var(--color-surfaceHigh);
+		text-decoration: none !important;
+	}
+
+	.btn-outline {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.5rem;
+		padding: 0.5rem 1rem;
+		border-radius: 0.5rem;
+		font-size: 0.875rem;
+		font-weight: 500;
+		background-color: transparent;
+		color: var(--color-accent1) !important;
+		border: 1.5px solid var(--color-accent1);
+		text-decoration: none !important;
+		transition:
+			background-color 150ms ease,
+			color 150ms ease;
+	}
+	.btn-outline:hover {
+		background-color: var(--color-accent1);
+		color: #ffffff !important;
+		text-decoration: none !important;
+	}
+
+	.btn-green {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.5rem;
+		padding: 0.5rem 1rem;
+		border-radius: 0.5rem;
+		font-size: 0.875rem;
+		font-weight: 500;
+		background-color: var(--color-accent2);
+		color: #ffffff !important;
+		text-decoration: none !important;
+		transition: background-color 150ms ease;
+	}
+	.btn-green:hover {
+		background-color: color-mix(in srgb, var(--color-accent2) 90%, black);
+		text-decoration: none !important;
+	}
+}
+
+/**
+ * Card component base
+ */
+.card {
+	background-color: var(--color-surface-mid);
+	border: 1px solid var(--color-border);
+	border-radius: 0.5rem;
+	padding: 1rem;
+}
+
+/**
+ * Link styles
+ *
+ * IMPORTANT: these rules are inside @layer base so that Tailwind utility classes
+ * (text-white, text-primary, etc.) in @layer utilities always override them.
+ * If you declare `a { color: ... }` outside any layer it becomes "unlayered" CSS,
+ * which beats every @layer rule regardless of specificity — causing text-white on
+ * <a> buttons to render as brown instead of white.
+ */
+@layer base {
+	a {
+		color: var(--color-accent1);
+		text-decoration: none;
+	}
+
+	a:hover {
+		text-decoration: underline;
+	}
+
+	/*
+	 * Buttons should never inherit link color. They rely on their own
+	 * text-* utilities or the parent's `color: inherit` chain.
+	 */
+	button {
+		color: inherit;
+	}
+}
+
+/**
+ * Scrollbar styling
+ */
+::-webkit-scrollbar {
+	width: 8px;
+	height: 8px;
+}
+
+::-webkit-scrollbar-track {
+	background: var(--color-surface-light);
+}
+
+::-webkit-scrollbar-thumb {
+	background: var(--color-border);
+	border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+	background: var(--color-secondary);
+}
+
+/**
+ * Form input base styles
+ */
+input,
+select,
+textarea {
+	font-family: inherit;
+}
+
+/**
+ * Animation utilities — marketing page animations
+ * Adapted from animation-svelte library (https://animation-svelte.vercel.app)
+ */
+@keyframes gradient {
+	0% {
+		background-position: 0% 50%;
+	}
+	50% {
+		background-position: 100% 50%;
+	}
+	100% {
+		background-position: 0% 50%;
+	}
+}
+
+@keyframes marquee {
+	from {
+		transform: translateX(0);
+	}
+	to {
+		transform: translateX(calc(-100% - var(--gap)));
+	}
+}
+
+@keyframes marquee-vertical {
+	from {
+		transform: translateY(0);
+	}
+	to {
+		transform: translateY(calc(-100% - var(--gap)));
+	}
+}
+
+@keyframes shiny-text {
+	0%,
+	90%,
+	100% {
+		background-position: calc(-100% - var(--shiny-width)) 0;
+	}
+	30%,
+	60% {
+		background-position: calc(100% + var(--shiny-width)) 0;
+	}
+}
+
+@keyframes fade-in-up {
+	from {
+		opacity: 0;
+		transform: translateY(24px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+@keyframes fade-in {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	.animate-gradient {
+		animation: gradient 8s linear infinite;
+		background-size: var(--bg-size, 300%) 100%;
+	}
+
+	.animate-marquee {
+		animation: marquee var(--duration) linear infinite;
+	}
+
+	.animate-marquee-vertical {
+		animation: marquee-vertical var(--duration) linear infinite;
+	}
+
+	.animate-shiny-text {
+		animation: shiny-text 8s infinite;
+	}
+
+	.animate-fade-in-up {
+		animation: fade-in-up 600ms ease-out both;
+	}
+
+	.animate-fade-in {
+		animation: fade-in 600ms ease-out both;
+	}
+}
+
+/**
+ * Animation utilities — core
+ */
+@keyframes spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+.animate-spin {
+	animation: spin 1s linear infinite;
+}
+
+@keyframes pulse {
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.5;
+	}
+}
+
+.animate-pulse {
+	animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/**
+ * Tier badge directional transition animations.
+ * Improving tiers slide up from below; declining tiers slide down from above.
+ * Communicates directionality without explanation.
+ */
+@keyframes tier-slide-up {
+	from {
+		opacity: 0;
+		transform: translateY(6px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+@keyframes tier-slide-down {
+	from {
+		opacity: 0;
+		transform: translateY(-6px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	.animate-tier-improve {
+		animation: tier-slide-up 200ms ease-out both;
+	}
+
+	.animate-tier-decline {
+		animation: tier-slide-down 200ms ease-out both;
+	}
+}
+
+/**
+ * Inquiry status badge pulse — draws attention to a status change
+ * without demanding interaction. Fires once, then recedes.
+ */
+@keyframes status-pulse {
+	0% {
+		transform: scale(1);
+	}
+	50% {
+		transform: scale(1.05);
+	}
+	100% {
+		transform: scale(1);
+	}
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	.animate-status-pulse {
+		animation: status-pulse 200ms ease-in-out both;
+	}
+}
+
+/**
+ * Score recording confirmation — a brief check that fades in and out.
+ */
+@keyframes confirm-fade {
+	0% {
+		opacity: 0;
+		transform: scale(0.8);
+	}
+	30% {
+		opacity: 1;
+		transform: scale(1);
+	}
+	70% {
+		opacity: 1;
+		transform: scale(1);
+	}
+	100% {
+		opacity: 0;
+		transform: scale(0.9);
+	}
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	.animate-confirm {
+		animation: confirm-fade 400ms ease-in-out both;
+	}
+}
+
+/**
+ * Metric row accordion expand/collapse.
+ * Uses CSS grid trick for smooth height animation without JS measuring.
+ */
+.accordion-content {
+	display: grid;
+	grid-template-rows: 0fr;
+	transition: grid-template-rows 180ms ease-out;
+}
+
+.accordion-content.open {
+	grid-template-rows: 1fr;
+}
+
+.accordion-inner {
+	overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.accordion-content {
+		transition: none;
+	}
+}
+
+/**
+ * Accessibility overrides
+ *
+ * Driven by data attributes on <html>. The AccessibilityMenu component
+ * sets these and persists them via cookie. Each option is independent
+ * so visitors can combine them freely.
+ */
+
+/* ── Text size: large (18px base) ── */
+[data-a11y-text='large'] {
+	font-size: 18px;
+}
+
+[data-a11y-text='large'] .text-hero {
+	font-size: 32px;
+}
+
+[data-a11y-text='large'] .text-page-heading {
+	font-size: 26px;
+}
+
+[data-a11y-text='large'] .text-section-heading {
+	font-size: 21px;
+}
+
+/* ── Text size: xl (20px base) ── */
+[data-a11y-text='xl'] {
+	font-size: 20px;
+}
+
+[data-a11y-text='xl'] .text-hero {
+	font-size: 36px;
+}
+
+[data-a11y-text='xl'] .text-page-heading {
+	font-size: 30px;
+}
+
+[data-a11y-text='xl'] .text-section-heading {
+	font-size: 24px;
+}
+
+/* ── High contrast ── */
+[data-a11y-contrast='high'] {
+	--color-primary: #000000;
+	--color-secondary: #1a1a1a;
+	--color-surface-light: #ffffff;
+	--color-surface-mid: #f5f5f5;
+	--color-surface-high: #e0e0e0;
+	--color-surfaceLight: #ffffff;
+	--color-surfaceMid: #f5f5f5;
+	--color-surfaceHigh: #e0e0e0;
+	--color-surface: #ffffff;
+	--color-border: #666666;
+	--color-accent1: #6b3a10;
+	--color-accent1-light: #c49570;
+	--color-accent2: #2d4a2e;
+	--color-accent3: #1c3a5e;
+}
+
+/* ── Reduced motion ── */
+[data-a11y-motion='reduce'] *,
+[data-a11y-motion='reduce'] *::before,
+[data-a11y-motion='reduce'] *::after {
+	animation-duration: 0.01ms !important;
+	animation-iteration-count: 1 !important;
+	transition-duration: 0.01ms !important;
+	scroll-behavior: auto !important;
+}

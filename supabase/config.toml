@@ -1,0 +1,25 @@
+# Supabase CLI configuration
+#
+# Scope: demo/web instance only. Customer deployments do not use Supabase and
+# ignore this file entirely (see CLAUDE.md → "Deployment Targets").
+#
+# The primary purpose of this file in-repo is to keep the **auth email
+# templates** in version control. The template files referenced below fix the
+# cross-browser PKCE issue that caused 400 errors on password-reset and
+# email-confirmation links — see supabase/templates/recovery.html for the
+# full explanation.
+#
+# To apply these templates to the live demo project:
+#   1. supabase link --project-ref <ref>
+#   2. supabase config push
+#
+# (Or paste the template HTML into Supabase Dashboard → Authentication →
+# Email Templates — same effect, one-time operation.)
+
+[auth.email.template.recovery]
+subject = "Reset your password"
+content_path = "./supabase/templates/recovery.html"
+
+[auth.email.template.confirmation]
+subject = "Confirm your email"
+content_path = "./supabase/templates/confirmation.html"

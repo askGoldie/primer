@@ -1,0 +1,42 @@
+<!--
+  Password Reset Email Template (Supabase Auth)
+
+  Why this template exists:
+    Supabase's default "recovery" email uses `{{ .ConfirmationURL }}`, which
+    under the PKCE flow produces a `pkce_<token>` link. That link is tied to
+    a code-verifier cookie stored on the browser that requested the reset,
+    so clicking it in a different browser / device returns HTTP 400.
+
+  This template uses `{{ .TokenHash }}` + `{{ .Type }}` instead, so the
+  callback endpoint verifies the link with `verifyOtp()` — a stateless flow
+  that works regardless of which browser opens the email.
+
+  How to apply (one-time, per Supabase project):
+    - Supabase Dashboard → Authentication → Email Templates → "Reset Password"
+      → replace the body with the markup below.
+    - OR: link the project with the Supabase CLI and run `supabase config push`
+      (see supabase/config.toml).
+
+  Template variables (substituted by Supabase at send time):
+    {{ .SiteURL }}     — the project's configured site URL
+    {{ .TokenHash }}   — single-use token verified via verifyOtp()
+    {{ .Type }}        — always "recovery" for this template
+    {{ .RedirectTo }}  — the `redirectTo` we pass to resetPasswordForEmail(),
+                         forwarded as `?next=…` for the callback to honour.
+-->
+<h2>Reset your password</h2>
+
+<p>
+	Click the link below to choose a new password. This link can be opened in any browser and will
+	expire shortly.
+</p>
+
+<p>
+	<a
+		href="{{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&type={{ .Type }}&next={{ .RedirectTo }}"
+	>
+		Reset your password
+	</a>
+</p>
+
+<p>If you didn't request this, you can safely ignore this email.</p>
