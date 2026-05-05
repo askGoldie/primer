@@ -207,7 +207,7 @@ ${escapeHtml(inquiry.organizationName)} and will respond within one business day
   <li><strong>Source code delivery</strong> — Upon payment and signature, you'll receive access to download the complete Primer source code from your dashboard.</li>
 </ol>
 
-<p>The license is perpetual. You own the source code, deploy it on your infrastructure,
+<p>The license is perpetual. You have the source code, deploy it on your infrastructure,
 and modify it however you need. No subscription, no recurring fees, no vendor dependency.</p>
 
 <p>If you have any questions before then, reply to this email.</p>
@@ -224,7 +224,7 @@ What happens next:
 2. Invoice — A $5,000 invoice for the perpetual source code license.
 3. Source code delivery — Upon payment and signature, you'll receive access to download the complete Primer source code from your dashboard.
 
-The license is perpetual. You own the source code, deploy it on your infrastructure, and modify it however you need. No subscription, no recurring fees, no vendor dependency.
+The license is perpetual. You have the source code, deploy it on your infrastructure, and modify it however you need. No subscription, no recurring fees, no vendor dependency.
 
 If you have any questions before then, reply to this email.
 

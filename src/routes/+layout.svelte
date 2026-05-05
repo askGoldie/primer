@@ -2,14 +2,13 @@
 	/**
 	 * Root Layout
 	 *
-	 * Wires up the Supabase auth state change listener following the official
-	 * @supabase/ssr pattern. When the user signs in or out in any tab,
-	 * onAuthStateChange fires and invalidate('supabase:auth') tells SvelteKit
-	 * to re-run +layout.ts, keeping the session in sync.
+	 * Provides the global shell for all pages including header,
+	 * footer, and HTML structure with locale support.
 	 *
-	 * The product chrome (sidebar, header) is provided by the per-route
-	 * layouts under /app — this root layout is intentionally minimal so that
-	 * unauthenticated screens like /login can render full-bleed.
+	 * Also wires up Supabase auth state change listener following the
+	 * official @supabase/ssr pattern. When the user signs in or out in
+	 * any tab, onAuthStateChange fires and invalidate('supabase:auth')
+	 * tells SvelteKit to re-run +layout.ts, keeping the session in sync.
 	 */
 
 	import './layout.css';
@@ -17,7 +16,10 @@
 	import { onMount } from 'svelte';
 	import { invalidate } from '$app/navigation';
 	import type { Snippet } from 'svelte';
+	import { page } from '$app/stores';
 	import { injectAnalytics } from '@vercel/analytics/sveltekit';
+	import Header from '$lib/components/layout/Header.svelte';
+	import Footer from '$lib/components/layout/Footer.svelte';
 	import type { LayoutData } from './$types.js';
 	import { t } from '$lib/i18n/index.js';
 
@@ -54,7 +56,13 @@
 		{t(data.locale, 'a11y.skip_to_content')}
 	</a>
 
+	<Header locale={data.locale} {session} />
+
 	<main id="main-content" class="flex-1">
 		{@render children()}
 	</main>
+
+	<div class={$page.url.pathname.startsWith('/app') ? 'lg:ml-64' : ''}>
+		<Footer locale={data.locale} />
+	</div>
 </div>
