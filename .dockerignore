@@ -1,0 +1,13 @@
+# Anything listed here is excluded from the Docker build context.
+# Keeps the image small and prevents leaking developer state (.env)
+# into a built image.
+
+node_modules
+.svelte-kit
+build
+.env
+.env.*
+.git
+.github
+docs
+*.md

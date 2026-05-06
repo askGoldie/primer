@@ -5,11 +5,12 @@
  * verification token. The user must verify their email before they can
  * log in (unless email is not configured — see notes below).
  *
- * Phase 4 will add a proper /auth/register UI page; for now the GET load
- * redirects back to /auth/login and the POST action is what gets used.
- *
- * Email sending is currently a console log — Phase 4 wires up the
- * postmark/SMTP-aware sender.
+ * The bundled email/password flow is intended as a placeholder. Most
+ * customers will replace `src/lib/server/auth/*` (and these routes)
+ * with their own SSO/OIDC integration during deployment, so the
+ * verification email is logged to stdout rather than wired to a
+ * transactional provider — drop in your own sender if you keep this
+ * flow.
  */
 
 import { fail, redirect } from '@sveltejs/kit';
@@ -95,9 +96,9 @@ export const actions: Actions = {
 		const verificationToken = await createVerificationToken(inserted.id);
 		const verificationUrl = `${pubEnv.PUBLIC_APP_URL ?? ''}/auth/verify-email?token=${verificationToken}&redirect=${encodeURIComponent(redirectTo)}`;
 
-		// TODO Phase 4: actually send the email via postmark/SMTP when
-		// POSTMARK_API_TOKEN or SMTP_URL is set. For now we log the link
-		// so customer-deployment operators can complete verification manually.
+		// The verification link is logged rather than emailed. Wire your
+		// transactional email provider here if you keep the bundled
+		// email/password auth flow.
 		console.log(`[register] verification link for ${email}: ${verificationUrl}`);
 
 		// Auto-create a session so the new user is logged in. They still

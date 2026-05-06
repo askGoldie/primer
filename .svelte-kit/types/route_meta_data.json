@@ -6,6 +6,9 @@
 		"src/routes/+layout.ts",
 		"src/routes/+layout.server.ts"
 	],
+	"/api/health": [
+		"src/routes/api/health/+server.ts"
+	],
 	"/app": [
 		"src/routes/app/+page.server.ts",
 		"src/routes/app/+layout.server.ts",

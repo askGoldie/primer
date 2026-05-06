@@ -5,13 +5,13 @@
 -- Inserts five Meridian Construction characters and sixty-nine Primer Internal
 -- personas into the public.users profile table.
 --
--- Meridian users have real Supabase Auth accounts created separately via the
--- Admin API (not this file). Their password_hash is NULL — authentication is
--- delegated to Supabase Auth.
+-- Meridian users have password_hash left NULL here. The seed runner
+-- (scripts/seed.ts) sets a scrypt-hashed demo password on them in a
+-- post-step, so visitors can sign in with the shared demo credentials.
 --
--- Primer Internal personas are fictional accounts used exclusively through the
--- primer_perspective cookie mechanism. They have no Supabase Auth accounts and
--- no password_hash. They are never used for direct login.
+-- Primer Internal personas are leftover from the legacy demo-site
+-- "perspective cookie" feature and are never used for direct login;
+-- their password_hash stays NULL.
 --
 -- UUID conventions:
 --   Meridian users: 00000000-0000-4000-a000-{12-digit index}

@@ -29,13 +29,15 @@ declare module "$app/types" {
 	type MatcherParam<M> = M extends (param : string) => param is (infer U extends string) ? U : string;
 
 	export interface AppTypes {
-		RouteId(): "/" | "/app" | "/app/admin" | "/app/admin/audit" | "/app/api" | "/app/api/audit-export" | "/app/api/placement-request" | "/app/goals" | "/app/inquiries" | "/app/inquiries/new" | "/app/inquiries/[id]" | "/app/leaders" | "/app/leaders/[id]" | "/app/onboarding" | "/app/peers" | "/app/performance" | "/app/reports" | "/app/settings" | "/app/settings/audit-log" | "/app/setup" | "/app/stack" | "/app/team" | "/app/visibility" | "/auth" | "/auth/forgot-password" | "/auth/login" | "/auth/logout" | "/auth/register" | "/auth/reset-password" | "/auth/verify-email" | "/auth/verify-email/resend" | "/favicon.ico";
+		RouteId(): "/" | "/api" | "/api/health" | "/app" | "/app/admin" | "/app/admin/audit" | "/app/api" | "/app/api/audit-export" | "/app/api/placement-request" | "/app/goals" | "/app/inquiries" | "/app/inquiries/new" | "/app/inquiries/[id]" | "/app/leaders" | "/app/leaders/[id]" | "/app/onboarding" | "/app/peers" | "/app/performance" | "/app/reports" | "/app/settings" | "/app/settings/audit-log" | "/app/setup" | "/app/stack" | "/app/team" | "/app/visibility" | "/auth" | "/auth/forgot-password" | "/auth/login" | "/auth/logout" | "/auth/register" | "/auth/reset-password" | "/auth/verify-email" | "/auth/verify-email/resend" | "/favicon.ico";
 		RouteParams(): {
 			"/app/inquiries/[id]": { id: string };
 			"/app/leaders/[id]": { id: string }
 		};
 		LayoutParams(): {
 			"/": { id?: string };
+			"/api": Record<string, never>;
+			"/api/health": Record<string, never>;
 			"/app": { id?: string };
 			"/app/admin": Record<string, never>;
 			"/app/admin/audit": Record<string, never>;
@@ -68,7 +70,7 @@ declare module "$app/types" {
 			"/auth/verify-email/resend": Record<string, never>;
 			"/favicon.ico": Record<string, never>
 		};
-		Pathname(): "/" | "/app" | "/app/admin" | "/app/admin/audit" | "/app/api/audit-export" | "/app/api/placement-request" | "/app/goals" | "/app/inquiries" | "/app/inquiries/new" | `/app/inquiries/${string}` & {} | "/app/leaders" | `/app/leaders/${string}` & {} | "/app/onboarding" | "/app/peers" | "/app/performance" | "/app/reports" | "/app/settings" | "/app/settings/audit-log" | "/app/setup" | "/app/stack" | "/app/team" | "/app/visibility" | "/auth/forgot-password" | "/auth/login" | "/auth/logout" | "/auth/register" | "/auth/reset-password" | "/auth/verify-email" | "/auth/verify-email/resend" | "/favicon.ico";
+		Pathname(): "/" | "/api/health" | "/app" | "/app/admin" | "/app/admin/audit" | "/app/api/audit-export" | "/app/api/placement-request" | "/app/goals" | "/app/inquiries" | "/app/inquiries/new" | `/app/inquiries/${string}` & {} | "/app/leaders" | `/app/leaders/${string}` & {} | "/app/onboarding" | "/app/peers" | "/app/performance" | "/app/reports" | "/app/settings" | "/app/settings/audit-log" | "/app/setup" | "/app/stack" | "/app/team" | "/app/visibility" | "/auth/forgot-password" | "/auth/login" | "/auth/logout" | "/auth/register" | "/auth/reset-password" | "/auth/verify-email" | "/auth/verify-email/resend" | "/favicon.ico";
 		ResolvedPathname(): `${"" | `/${string}`}${ReturnType<AppTypes['Pathname']>}`;
 		Asset(): "/.DS_Store" | "/favicon.svg" | "/fonts/.DS_Store" | "/fonts/inter/.DS_Store" | "/fonts/inter/inter-latin-400.woff2" | "/fonts/inter/inter-latin-500.woff2" | "/fonts/inter/inter-latin-600.woff2" | "/fonts/jetbrainsmoto/.DS_Store" | "/fonts/jetbrainsmoto/JetBrainsMono-Regular.woff2" | "/logo.png" | "/logo.svg" | "/logo.webp" | string & {};
 	}

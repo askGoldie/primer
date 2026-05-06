@@ -1,0 +1,70 @@
+# Primer — Docker Compose deployment (Option B)
+#
+# Three services:
+#   app    — SvelteKit Node server (built from ./Dockerfile)
+#   db     — PostgreSQL 15, persistent volume db-data
+#   proxy  — Caddy reverse proxy on :80 (and :443 when a real hostname
+#            is configured)
+#
+# Customer command sequence:
+#   cp .env.example .env
+#   docker compose up -d
+#
+# All env values fall back to safe defaults so an unmodified .env.example
+# is enough for a local evaluation. Change POSTGRES_PASSWORD before
+# exposing the deployment to a real network.
+
+name: primer
+
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://primer:${POSTGRES_PASSWORD:-changeme}@db:5432/primer
+      DATABASE_SSL: disable
+      PORT: 3000
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://localhost}
+      PRIMER_SEED_ON_BOOT: ${PRIMER_SEED_ON_BOOT:-true}
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:3000/api/health']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: primer
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: primer
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U primer -d primer']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  db-data:
+  caddy-data:
+  caddy-config:

@@ -1,0 +1,35 @@
+# Primer — Caddy reverse proxy
+#
+# Default configuration: terminate HTTP at :80 and proxy to the app
+# container on :3000. No automatic HTTPS — the local-evaluation flow
+# uses http://localhost.
+#
+# To deploy on a real hostname:
+#   1. Remove the `auto_https off` block below.
+#   2. Replace the `:80` site block with one keyed by your hostname:
+#
+#        primer.your-company.com {
+#          reverse_proxy app:3000
+#          encode gzip
+#        }
+#
+#   3. Restart the proxy: `docker compose restart proxy`.
+#
+# Caddy will obtain a Let's Encrypt certificate automatically as long
+# as DNS for the hostname points at this host and ports 80/443 are
+# reachable from the public internet.
+
+{
+	auto_https off
+}
+
+:80 {
+	reverse_proxy app:3000
+
+	encode gzip
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+}

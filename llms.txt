@@ -1,0 +1,49 @@
+# Primer
+
+> Self-hosted leadership performance management platform, distributed as a perpetual source-code license. Customers receive a zip, run it on their own PostgreSQL + Node infrastructure (or via Docker Compose), and modify the source freely. No telemetry, no license server, no SaaS dependency at runtime.
+
+This file is a structured map for AI assistants. Read `README.md` for installation and `CLAUDE.md` for codebase orientation. Both are at the project root.
+
+## Stack
+- TypeScript + SvelteKit 2 (Svelte 5 runes mode)
+- `@sveltejs/adapter-node` (build artefact is a vanilla Node server)
+- PostgreSQL 15+ via `postgres` (postgres-js, no ORM)
+- Tailwind CSS 4 (theme tokens in `src/routes/layout.css` `@theme` block)
+- Application-layer scrypt auth (`src/lib/server/auth/index.ts`); intended to be replaced with the customer's SSO
+
+## Documentation
+- [README.md](./README.md): Customer quickstart — installation (Option A direct install, Option B Docker Compose), configuration, customization, troubleshooting
+- [CLAUDE.md](./CLAUDE.md): Orientation document for AI assistants and developers — project layout, conventions, non-negotiable rules (i18n, DB access, no telemetry, no RLS)
+- [.env.example](./.env.example): Annotated configuration reference; copy to `.env` and edit
+
+## Source code
+- [src/routes/auth/](./src/routes/auth/): Login / register / password reset / email verification (placeholder flow; expected to be replaced for SSO/OIDC/SAML deployments)
+- [src/routes/app/](./src/routes/app/): The product surface — goals, peers, hierarchy, leaders, reports, team, settings, inquiries, admin
+- [src/routes/api/health/](./src/routes/api/health/): Public liveness probe consumed by Docker Compose and external monitoring
+- [src/lib/server/db.ts](./src/lib/server/db.ts): The single postgres-js client; `sql` tagged template plus `one`, `maybeOne`, `many` helpers. All server-side DB access goes through this file.
+- [src/lib/server/auth/index.ts](./src/lib/server/auth/index.ts): Scrypt password hashing, session cookie management, email-verification and password-reset tokens
+- [src/lib/server/permissions.ts](./src/lib/server/permissions.ts): The role × hierarchy authorization matrix; canonical entry points are `verifyManagementAccess` and `verifySnapshotAdjustAccess`
+- [src/lib/server/hierarchy.ts](./src/lib/server/hierarchy.ts): Org-tree traversal helpers (subtree node IDs, ancestor checks)
+- [src/lib/server/action-context.ts](./src/lib/server/action-context.ts): Rebuilds the org/membership/userNode context inside form actions (since SvelteKit actions don't get `parent()`)
+- [src/lib/i18n/](./src/lib/i18n/): One JSON file per supported language (en, zh, es, ar, fr, de, ja, pt, ko); flat dot-namespaced keys; missing non-English keys fall back to English with a console warning
+- [src/lib/types/index.ts](./src/lib/types/index.ts): Domain types — `TierLevel`, `OrgRole`, `HierarchyNodeType`, `OrgGoal`, `MetricOrigin`, etc.
+- [src/hooks.server.ts](./src/hooks.server.ts): `handleLocale` (resolves locale from cookie + Accept-Language) → `handleAuth` (validates session, populates `locals.user`). Route-level guards live in `src/routes/app/+layout.server.ts`, which redirects to `/auth/login` when `locals.user` is null.
+
+## Database
+- [migrations/](./migrations/): SQL schema, applied in lexical order by `npm run migrate`. Tracked in `schema_migrations` table. Plain PostgreSQL; no Supabase features, no RLS.
+- [seeds/](./seeds/): Demo data SQL files, applied by `npm run seed`. Tracked in `schema_seeds` table. Includes the Meridian Construction demo organization (login: `demo@primer.company` / `demo2025`).
+- [scripts/migrate.ts](./scripts/migrate.ts): Migration runner
+- [scripts/seed.ts](./scripts/seed.ts): Seed runner; also sets scrypt-hashed demo passwords on Meridian users post-seed
+
+## Deployment
+- [Dockerfile](./Dockerfile): Multi-stage build — build stage installs deps + builds + prunes; runtime stage is `node:20-alpine` with non-root user
+- [docker-compose.yml](./docker-compose.yml): Three services — `app` (built locally), `db` (postgres:15-alpine, persistent volume `db-data`), `proxy` (caddy:2-alpine, ports 80/443)
+- [docker/entrypoint.sh](./docker/entrypoint.sh): Always runs migrations; runs seed only on first boot (gated by `PRIMER_SEED_ON_BOOT` and a marker file); `exec node build` for clean SIGTERM
+- [caddy/Caddyfile](./caddy/Caddyfile): Local-default `:80` reverse proxy with security headers; comments explain the one-edit path to a real hostname with automatic Let's Encrypt
+
+## Non-negotiable rules
+- **i18n**: Never hardcode user-facing strings. Use `t('key.name')`. Add new keys to `en.json` first, then mirror to all 8 other locales.
+- **DB**: Use parameterized queries via the postgres-js tagged template. Never concatenate user input into SQL. Never modify existing migration files — add new ones.
+- **Permissions**: Application-layer only (`src/lib/server/permissions.ts`). No Postgres RLS, no `auth.uid()` in SQL.
+- **Telemetry**: None. Primer makes zero outbound network calls at runtime. Do not add analytics, error reporters, or update checks.
+- **Dependencies**: Add new ones reluctantly. The customer must trust and maintain every entry in `package.json`. Prefer copying ~50 lines over adding a 500-line library.

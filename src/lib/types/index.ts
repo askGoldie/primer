@@ -101,9 +101,6 @@ export interface Organization {
  *   for manager approval, and file inquiries. Cannot approve
  *   metrics, manage other nodes, or capture snapshots.
  * - viewer: Read-only access.
- *
- * @see /supabase/migrations/20260101000017_system_admin_role.sql
- * @see /supabase/migrations/20260101000019_role_expansion.sql
  */
 export type OrgMemberRole =
 	| 'owner'

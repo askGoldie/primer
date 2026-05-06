@@ -1,135 +1,163 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Orientation document for AI assistants (Claude Code, Cursor, ChatGPT) and human developers working in this repository.
 
-## Stack
+If you are an AI assistant: read this file first. It tells you how this codebase is organized, what conventions to follow, and what not to break. Customers rely on this file to keep AI-driven changes safe.
 
-- **Language**: TypeScript
-- **Framework**: SvelteKit (Svelte 5 with runes — runes mode is forced everywhere except `node_modules` in `svelte.config.js`)
-- **Adapter**: `@sveltejs/adapter-vercel`
-- **Database client**: `postgres` (postgres-js) — see Phase 2 note below
-- **Styling**: Tailwind v4 (Vite plugin) + `@tailwindcss/forms` + `@tailwindcss/typography`
-- **Package Manager**: npm
+---
 
-## Commands
+## What Primer is
 
-```sh
-npm run dev          # vite dev server
-npm run build        # vite build (also runs prepack: svelte-package + publint)
-npm run preview      # preview production build
-npm run check        # svelte-kit sync && svelte-check (typecheck)
-npm run check:watch  # same, watch mode
-npm run lint         # prettier --check . && eslint .
-npm run format       # prettier --write .
-npm run migrate      # apply pending SQL migrations to DATABASE_URL (tsx scripts/migrate.ts)
-npm run demo:seed    # seed Hans Ruber demo org (transitional — see scripts/seed-demo.ts)
+A self-hosted SvelteKit web application for organizational performance management. It is distributed as a perpetual source-code license — customers receive a zip, run it on their own infrastructure, modify it freely, and never talk to a license server. There is no SaaS, no telemetry, no phone-home. The customer owns the code and is expected to modify it.
+
+---
+
+## The two questions you'll be asked first
+
+- **"How do I run it?"** → Read `README.md`. Two paths: direct install (`npm install && npm run migrate && npm run seed && npm run build && node build`) or Docker Compose (`docker compose up -d`).
+- **"How do I change a string visible to users?"** → It goes through the i18n system. Never hardcode user-facing strings in `.svelte`, `+page.svelte`, or `+server.ts` files. See [Internationalization](#internationalization-non-negotiable) below.
+- **"Where does data live?"** → PostgreSQL. Schema in `migrations/`, demo data in `seeds/`. Server-side access goes through `src/lib/server/db.ts` (postgres-js, no ORM).
+- **"How does login work?"** → `src/lib/server/auth/index.ts`. Scrypt-based password hashing, sessions in a `primer_session` cookie. Most customers replace this with their own SSO — see [Auth](#auth-how-it-works-in-30-seconds) below.
+- **"Is there telemetry?"** → No. Primer makes zero outbound network calls at runtime.
+
+---
+
+## Project layout
+
+```
+primer-source/
+├── README.md                 ← Start here for installation
+├── CLAUDE.md                 ← This file
+├── package.json
+├── docker-compose.yml        ← Option B: one-command deploy
+├── Dockerfile                ← Used by docker-compose
+├── caddy/                    ← Reverse proxy config (Option B)
+├── migrations/               ← SQL schema migrations (run via `npm run migrate`)
+├── seeds/                    ← Demo data (run via `npm run seed`)
+├── scripts/                  ← migrate.ts, seed.ts
+├── static/                   ← Logos, favicon, fonts
+└── src/
+    ├── routes/
+    │   ├── auth/             ← Login, register, password reset (placeholder; replace for SSO)
+    │   ├── app/              ← The product (goals, peers, hierarchy, settings, etc.)
+    │   └── api/              ← Internal API endpoints (health, exports)
+    ├── lib/
+    │   ├── components/       ← Reusable Svelte components
+    │   ├── i18n/             ← Translation files (one .json per language)
+    │   ├── server/           ← Server-only code (DB, auth, permissions, hierarchy)
+    │   └── types/            ← TypeScript type definitions
+    ├── app.html              ← HTML shell with %lang%/%dir% placeholders
+    └── hooks.server.ts       ← Locale detection, session validation, route guards
 ```
 
-There is no test runner configured. Don't invent one — `check` (svelte-check) and `lint` are the only verification gates.
+---
 
-## Two Deployment Targets — Do Not Conflate
+## Project configuration (the facts that don't change)
 
-### 1. Demo Site (team-hosted)
+```
+Language:        TypeScript
+Framework:       Svelte 5 (with runes mode), SvelteKit 2
+Adapter:         @sveltejs/adapter-node
+Database:        PostgreSQL 15 or later
+DB client:       postgres-js (no ORM)
+Auth:            Application-layer scrypt (src/lib/server/auth/index.ts)
+Styling:         Tailwind CSS 4 (theme tokens in src/routes/layout.css)
+Package manager: npm
+Tests:           svelte-check (type checks), eslint, prettier — no runtime test framework
+```
 
-- Hosted by the DavidPM team as a live product demo
-- Uses **Supabase Postgres** as the database
-- `DATABASE_URL` in `.env` points to the Supabase project connection string
+Runes mode is forced everywhere except `node_modules` (see `svelte.config.js`).
 
-### 2. Customer Source Code Package
+---
 
-- Delivered as a zip on perpetual-license purchase; customer owns the source
-- Uses **plain PostgreSQL** — no Supabase dependency
-- No Supabase RLS or GoTrue auth — access control is enforced at the application layer
-- `.env.example` ships with `postgres://user:password@host:port/db-name` for any provider (Neon, Railway, self-hosted)
+## The three deployment options
 
-**Key rule**: DB-related code must remain provider-agnostic. No Supabase-specific APIs, no RLS, no `auth.uid()`. The Supabase connection is purely infrastructure for the demo site.
+One paragraph each. Full instructions in `README.md`.
 
-The full delivery model — what ships, the three deployment options (Direct Install / Docker Compose / Customer Infrastructure), what does NOT ship — is in `docs/Primer-Delivery.md`. The phased refactor plan toward that target lives in `docs/delivery-plan/00-overview.md` and onward.
+- **Option A — Direct Install:** Node 20 + a Postgres 15+ database somewhere. See `README.md` § "Option A".
+- **Option B — Docker Compose:** Docker Engine + Compose v2. App, Postgres, and Caddy reverse proxy in three containers. See `README.md` § "Option B".
+- **Option C — Your Infrastructure:** Combine Option A with your existing managed Postgres, identity provider, and reverse proxy. The auth layer is intentionally a placeholder and is expected to be swapped — contact DavidPM support for an integration walkthrough.
 
-## Architecture
+---
 
-### Request lifecycle
+## Internationalization (non-negotiable)
 
-`src/hooks.server.ts` runs two hooks via `sequence()`:
+This is the most-violated rule when AI assistants modify SvelteKit codebases. Make it impossible to miss.
 
-1. **`handleLocale`** — resolves locale from the `primer_lang` cookie or `Accept-Language` header into `event.locals.locale`, then substitutes `%lang%` and `%dir%` (`rtl`/`ltr`) in `src/app.html`.
-2. **`handleAuth`** — reads the `primer_session` cookie, calls `validateSession()` from `$lib/server/auth/index.js`, populates `event.locals.user` and `event.locals.isAdmin`. Auth failures must never 500 — log and continue unauthenticated.
+- **Never hardcode user-facing strings** in `.svelte`, `+page.svelte`, `+server.ts`, or any other file that renders to a user. Always use `t('key.name')` from `$lib/i18n/index.ts`.
+- **Locale files** live at `src/lib/i18n/{locale}.json`. Flat key-value pairs. Dot-namespaced keys (e.g. `nav.home`, `settings.org.title`).
+- **Adding a new key:** add it to `en.json` first, then mirror into every other locale file. `validateLocales()` enforces this at build time.
+- **Interpolation:** `t('demo.weight_total', { total: 95 })` for `"demo.weight_total": "Total: {total}%"`.
+- **Supported languages:** English (en), Chinese (zh), Spanish (es), Arabic (ar), French (fr), German (de), Japanese (ja), Portuguese (pt), Korean (ko).
+- **Arabic is RTL.** Components with directional layout must use Tailwind `rtl:` utility variants. The HTML `dir` attribute is set automatically by `hooks.server.ts` based on the user's locale cookie (`primer_lang`).
+- **Common task: change the displayed application name.** Edit the `app.name` key in every locale file. Do not search-and-replace strings in components.
 
-`event.locals` shape is declared in `src/app.d.ts` (`locale`, `user`, `isAdmin`).
+---
 
-### Routes
+## Database access (non-negotiable)
 
-- `src/routes/+page.server.ts` — public landing
-- `src/routes/auth/*` — `login`, `register`, `logout`, `forgot-password`, `reset-password`, `verify-email`. Cookie-based session auth, scrypt password hashing.
-- `src/routes/app/*` — authenticated app. `+layout.server.ts` requires `locals.user`, redirects to `/auth/login` if missing, and to `/app/setup` if the user has no org membership. It also computes navigation flags (`hasDirectReports`, `isManagerOfManagers`, `hasPeers`, `isSystemAdmin`, `isHrAdmin`, `isParticipant`, `needsPlacement`, `showVisibilityTab`) consumed by `+layout.svelte`. Sub-routes: `goals`, `inquiries`, `leaders`, `peers`, `reports`, `team`, `settings`, `setup`, `admin`, `api`.
+- **All server-side database access** goes through `src/lib/server/db.ts`, which exports a `postgres-js` tagged-template `sql` plus three helpers: `one`, `maybeOne`, `many`.
+- **Use parameterized queries.** `sql\`select * from users where id = ${userId}\`` — postgres-js handles parameterization. **Never** string-concatenate user input into SQL.
+- **Schema changes go in `migrations/`.** Add a new file (`migrations/YYYYMMDDHHMMSS_description.sql`); never modify existing migration files. Customers' existing databases have already applied them. The runner (`scripts/migrate.ts`) tracks applied filenames in a `schema_migrations` table.
+- **Application-layer permissions live in `src/lib/server/permissions.ts`.** Do not add Postgres RLS policies — Primer does not use them and adding them complicates upgrades. The role × hierarchy authorization matrix is the canonical entry point for access decisions.
+- **Demo data goes in `seeds/`.** Same idempotency model: `scripts/seed.ts` tracks applied filenames in `schema_seeds`.
 
-### Server modules (`src/lib/server/`)
+---
 
-- **`db.ts`** — exposes **two** clients during the in-flight Supabase → postgres-js migration (Phase 2):
-  - `sql` (postgres-js tagged template) is the **target** client. Use this for all new code. Helpers `one`, `maybeOne`, `many` wrap the common shapes.
-  - `db` (typed `@supabase/supabase-js` admin client) is **legacy**, kept only for un-migrated call sites. Will be removed at the end of Phase 2. Don't add new call sites against it.
-- **`auth/index.ts`** — scrypt password hashing, sessions (`primer_session` cookie, 7-day TTL), email-verification and password-reset tokens. All auth queries go through `sql`. This file already implements the customer-package auth model — there is no other auth provider to switch to.
-- **`permissions.ts`** — the role × hierarchy authorization matrix. Every authorization decision should flow through this module. Two dimensions: org_role (`owner`, `system_admin`, `hr_admin`, `editor`, `participant`, `viewer`) and tree position (ancestor/peer/self). `system_admin` bypasses hierarchy; `hr_admin` is org-wide member management without metric/snapshot powers; `verifyManagementAccess` and `verifySnapshotAdjustAccess` are the canonical entry points.
-- **`hierarchy.ts`** — tree traversal helpers (`getSubtreeNodeIds`, `getDirectChildNodeIds`, `isAncestorOf`). Uses in-memory tree walks rather than recursive CTEs for portability across Postgres providers.
-- **`action-context.ts`** — SvelteKit form actions don't get the `parent()` function (load-only). `loadActionContext(userId)` rebuilds the org/membership/userNode/`hasDirectReports` context that `/app/+layout.server.ts` produces, so actions can branch consistently. Returns `null` when the user has no membership — caller should `fail(403, …)`.
-- **`csv.ts`**, **`postmark/`**, **`license/`**, **`demo/`** — CSV parsing, transactional email, license stub, demo-org seeding.
+## Auth: how it works in 30 seconds
 
-### Database schema
+- Login form posts to `/auth/login`. The server looks up the user by email, calls `verifyPassword(input, user.password_hash)`, calls `createSession(user.id)`, and sets the `primer_session` httpOnly cookie. That's it.
+- `hooks.server.ts` reads the cookie on every request, calls `validateSession()`, and populates `event.locals.user`. Routes under `/app` redirect to `/auth/login` if `locals.user` is null.
+- Passwords are scrypt-hashed via `src/lib/server/auth/index.ts`. Sessions are random 32-byte tokens stored in the `sessions` table.
+- **The bundled flow is intentionally a placeholder.** Most Option C deployments swap the entire `src/lib/server/auth/` module for an OIDC/SAML/LDAP integration. The contract downstream code depends on is `event.locals.user` — replace `validateSession()` with a call to your provider; everything that reads `locals.user` keeps working.
 
-Two parallel migration directories exist during the transition:
+---
 
-- **`migrations/`** — the **canonical** customer-package SQL, applied by `npm run migrate` (`scripts/migrate.ts`). Tracked in a `schema_migrations` table; each filename runs exactly once in lexical order. Plain PostgreSQL, no Supabase features.
-- **`supabase/migrations/`** — legacy migration set used by the demo site's Supabase deployment. Don't add new migrations here — add to `migrations/` instead.
+## Common customizations and where to do them
 
-`seeds/*.sql` is the canonical demo seed data; `supabase/seeds/` is its legacy mirror.
+| Customer request                | Touch                                                                                                  |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Change the application name     | `app.name` key in every `src/lib/i18n/*.json`                                                          |
+| Replace the logo                | `static/logo.svg`, `static/logo.png`, `static/logo.webp`, `static/favicon.svg`                         |
+| Change brand colors             | `src/routes/layout.css` `@theme { ... }` block (Tailwind 4 theme tokens)                                |
+| Add a language                  | New file `src/lib/i18n/<code>.json`; register in `src/lib/i18n/index.ts`                                |
+| Disable a product feature       | Delete the route folder under `src/routes/app/`; remove nav entries; remove its i18n keys              |
+| Connect to existing Postgres    | Edit `DATABASE_URL` in `.env`                                                                          |
+| Wire a transactional email      | Replace the `console.log` lines in `src/routes/auth/{register,forgot-password,verify-email}/...` with your provider's SDK |
+| Add an SSO provider             | Replace `src/lib/server/auth/` with provider SDK; preserve the `validateSession()` shape used by hooks |
+| Add a custom report or export   | New route under `src/routes/app/reports/`; new SQL query in the loader                                  |
 
-Domain tables you'll see referenced everywhere: `users`, `organizations`, `org_members`, `org_hierarchy_nodes` (self-referencing tree via `parent_id`), `org_goals`, `metrics`, `metric_thresholds`, `score_snapshots`, `performance_logs`, `inquiries`, `audit_log_entries`, `sessions`. Domain types in `src/lib/types/index.ts`.
+---
 
-### Domain model — Tier framework
+## Code quality expectations
 
-Performance is assessed against a five-level tier scale (`alarm` → `concern` → `content` → `effective` → `optimized`, numeric 1–5) defined in `src/lib/types/index.ts`. Metrics have measurement types (`numeric`, `percentage`, `currency`, `binary`, `scale`, `milestone`, `checklist`, `range`, `qualitative`), per-tier thresholds, weights, and produce immutable `score_snapshots`. Hierarchy node types (`executive_leader`, `department`, `team`, `individual`) have containment rules (`CONTAINMENT_RULES`, `VALID_PARENTS`).
+- TypeScript strict; `npm run check` must pass.
+- JSDoc on public functions, types, and modules. Document _why_ when the why isn't obvious from the code; don't restate _what_.
+- Inline comments only when the logic surprises (a workaround, a hidden invariant, a regulatory rule).
+- New components: descriptive name, props documented with JSDoc, default values where reasonable.
+- No emojis in code, comments, or commit messages.
+- Don't add features that weren't requested. Don't refactor unrelated code while making a fix.
 
-## Internationalization
+---
 
-Every page operates in nine languages. **No hardcoded user-facing strings** in `.svelte`, `+page.svelte`, or `+server.ts` responses.
+## What NOT to do
 
-| Code | Language               |
-| ---- | ---------------------- |
-| en   | English                |
-| zh   | 中文 (Chinese)         |
-| es   | Español (Spanish)      |
-| ar   | العربية (Arabic, RTL)  |
-| fr   | Français (French)      |
-| de   | Deutsch (German)       |
-| ja   | 日本語 (Japanese)      |
-| pt   | Português (Portuguese) |
-| ko   | 한국어 (Korean)        |
+- **Do not hardcode user-facing strings.** Use `t()`. (See [Internationalization](#internationalization-non-negotiable).)
+- **Do not add Postgres RLS or `auth.uid()` calls in migrations.** Application-layer permissions only — they live in `src/lib/server/permissions.ts`.
+- **Do not introduce ORM dependencies.** The codebase uses postgres-js with raw SQL by design — readability for customers > developer ergonomics.
+- **Do not add telemetry, analytics, or "phone home" code.** Primer's contract with customers is zero outbound calls at runtime.
+- **Do not add new dependencies casually.** Each dependency is a thing the customer must trust and keep updated. Prefer copying ~50 lines into the codebase over adding a 500-line library.
+- **Do not modify migration files after they've been added.** Add a new migration that alters the schema; never edit an existing one. The same applies to seed files.
+- **Do not split this codebase into a multi-package monorepo.** Customers received a single zip; keep the layout flat.
+- **Do not introduce a runtime test framework casually.** `npm run check` (type checks) and `npm run lint` are the existing gates. If you genuinely need tests, ask before adding a runner.
 
-- **Locale files**: `src/lib/i18n/{locale}.json`, flat key-value, dot-namespaced keys (e.g. `nav.home`, `demo.weight_total`).
-- **Helper**: `t(locale, key, vars?)` from `src/lib/i18n/index.ts`. Interpolation uses `{name}` syntax. Missing non-English keys fall back to English with a `console.warn`.
-- **Adding strings**: add to `en.json` first, then mirror into all eight other locale files. `validateLocales()` enforces completeness.
-- **Cookie**: `primer_lang` (one year, `SameSite=Lax`). Set by the language switcher; not URL-path-based.
-- **RTL**: Arabic requires `dir="rtl"` (set in the locale hook) and Tailwind `rtl:` variants for any directional styling.
+---
 
-## Code Quality Bar (customer-readable codebase)
+## AI-assistant-specific guidance
 
-Customers will read, modify, and maintain this code without external support. That changes the bar:
+If you are Claude Code or a similar agent:
 
-- Write JSDoc on public functions, types, and modules — many existing modules (`db.ts`, `permissions.ts`, `auth/index.ts`, `i18n/index.ts`) already model this well.
-- Inline comments for non-obvious business rules (e.g. why `system_admin` bypasses hierarchy, why hr_admin is excluded from snapshot adjustment).
-- Prefer descriptive names over comments where naming alone suffices.
-
-## Tooling notes
-
-- ESLint config (`eslint.config.js`) allows `_`-prefixed unused vars and turns off `svelte/no-navigation-without-resolve` (no base path is configured).
-- Prettier is the single source for formatting; ESLint defers to it.
-- The `.svelte-kit/` directory is generated — it shows up modified in `git status` after running `dev`/`build`/`check`. Don't commit it (it's gitignored), and don't read its files for understanding the codebase.
-
-## Svelte MCP server
-
-You have access to a Svelte MCP server with comprehensive Svelte 5 / SvelteKit documentation:
-
-- **`list-sections`** — call FIRST when working on Svelte/SvelteKit topics. Returns titles, use_cases, paths.
-- **`get-documentation`** — fetch full content for the relevant sections (use the `use_cases` field to pick).
-- **`svelte-autofixer`** — run on any Svelte code you write, repeatedly until it returns no issues.
-- **`playground-link`** — only generate after user confirmation, and **never** when code was written to files in this project.
+- The repository is a single SvelteKit project. Do not propose a "monorepo restructure", do not add workspace tooling, do not split `src/lib` into separate packages.
+- After any non-trivial change, run `npm run check` and `npm run lint`. Both must pass.
+- If your tooling has a Svelte MCP server available, use `list-sections` and `get-documentation` to look up Svelte 5 / SvelteKit patterns rather than guessing. Run `svelte-autofixer` after writing any Svelte code. If no MCP server is available, consult [svelte.dev/docs](https://svelte.dev/docs) before writing component code.
+- When you change a file path, env var, or script name, update this CLAUDE.md and `README.md` so they keep agreeing with the code.

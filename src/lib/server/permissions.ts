@@ -20,9 +20,6 @@
  * The participant role sits between viewer and editor: can create own goals,
  * record performance data, submit metrics for review, and file inquiries —
  * but cannot approve metrics, manage other nodes, or capture snapshots.
- *
- * @see /supabase/migrations/20260101000017_system_admin_role.sql
- * @see /supabase/migrations/20260101000019_role_expansion.sql
  */
 
 import { sql, maybeOne } from '$lib/server/db.js';
