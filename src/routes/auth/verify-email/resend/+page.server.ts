@@ -1,22 +1,22 @@
 /**
  * Resend Verification Email
  *
- * Triggers Supabase Auth to resend the confirmation email.
- * Always returns success to prevent email enumeration.
+ * Issues a fresh verification token for an unverified user.
+ * Always returns success to avoid leaking whether an account exists.
  */
 
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types.js';
-import { createSupabaseServerClient } from '$lib/server/supabase.js';
+import { sql, maybeOne } from '$lib/server/db.js';
+import { createVerificationToken } from '$lib/server/auth/index.js';
 import { env as pubEnv } from '$env/dynamic/public';
 
 export const load: PageServerLoad = async ({ url }) => {
-	// Canonical resend page is now /web/verify-email/resend
-	redirect(302, `/web/verify-email/resend${url.search}`);
+	redirect(302, `/auth/login${url.search}`);
 };
 
 export const actions: Actions = {
-	default: async ({ request, cookies }) => {
+	default: async ({ request }) => {
 		const formData = await request.formData();
 		const email = formData.get('email')?.toString().trim().toLowerCase();
 		const redirectTo = formData.get('redirect')?.toString() || '/app';
@@ -30,20 +30,16 @@ export const actions: Actions = {
 			return fail(400, { error: 'validation.email_invalid', email });
 		}
 
-		const supabase = createSupabaseServerClient(cookies);
+		const user = await maybeOne<{ id: string; email_verified: boolean | null }>(sql`
+			select id, email_verified from users where email = ${email} and deactivated_at is null
+		`);
 
-		// Supabase silently ignores unknown emails - safe against enumeration.
-		// `emailRedirectTo` is the final destination after the /auth/callback
-		// endpoint verifies the token; the confirmation email template
-		// (supabase/templates/confirmation.html) wraps this into the
-		// callback URL's `next` query param.
-		await supabase.auth.resend({
-			type: 'signup',
-			email,
-			options: {
-				emailRedirectTo: `${pubEnv.PUBLIC_APP_URL}${redirectTo}`
-			}
-		});
+		if (user && user.email_verified !== true) {
+			const token = await createVerificationToken(user.id);
+			const verifyUrl = `${pubEnv.PUBLIC_APP_URL ?? ''}/auth/verify-email?token=${token}&redirect=${encodeURIComponent(redirectTo)}`;
+			// TODO Phase 4: actually send the email when configured.
+			console.log(`[verify-email/resend] verification link for ${email}: ${verifyUrl}`);
+		}
 
 		return { success: true, email, redirectTo };
 	}

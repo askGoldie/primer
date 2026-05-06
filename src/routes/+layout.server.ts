@@ -1,22 +1,14 @@
 /**
  * Root Layout Server Load
  *
- * Runs on every request. Passes locale, user, and the validated Supabase
- * session to all pages via PageData. The session is needed by +layout.ts
- * to initialise the browser-side Supabase client correctly.
+ * Runs on every request. Passes locale and user to all pages via PageData.
  */
 
 import type { LayoutServerLoad } from './$types.js';
 
-export const load: LayoutServerLoad = async ({ locals, cookies }) => {
-	const { session } = await locals.safeGetSession();
-
+export const load: LayoutServerLoad = async ({ locals }) => {
 	return {
 		locale: locals.locale,
-		user: locals.user,
-		session,
-		// Raw cookies forwarded to +layout.ts so the server-side render of the
-		// browser client can read the same session without an extra round-trip.
-		cookies: cookies.getAll()
+		user: locals.user
 	};
 };

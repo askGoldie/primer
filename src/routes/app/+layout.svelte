@@ -102,7 +102,7 @@
 		<!-- Logo -->
 		<div class="flex h-14 items-center border-b border-border px-6">
 			<a href={href('/app')} class="flex items-center gap-3">
-				<img src="/demo-logo.webp" alt={data.organization.name} class="h-8" />
+				<img src="/logo.svg" alt={data.organization.name} class="h-8" />
 				<span class="font-medium text-primary">{data.organization.name}</span>
 			</a>
 		</div>
@@ -291,36 +291,6 @@
 			</ul>
 		</nav>
 
-		<!-- Switch role link (platform mode) -->
-		{#if data.isPlatform}
-			<div class="mt-4 border-t border-border px-4 pt-4">
-				<p class="px-3 text-xs text-secondary">
-					{t(data.locale, 'platform.banner_viewing_as', {
-						name: data.userNode?.name ?? ''
-					})}
-				</p>
-				<a
-					href={href('/platform')}
-					class="mt-1 flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-secondary transition-colors hover:bg-surfaceHigh hover:text-primary"
-				>
-					<svg
-						class="h-4 w-4"
-						fill="none"
-						viewBox="0 0 24 24"
-						stroke="currentColor"
-						aria-hidden="true"
-					>
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							stroke-width="2"
-							d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"
-						/>
-					</svg>
-					{t(data.locale, 'platform.switch_role')}
-				</a>
-			</div>
-		{/if}
 
 		<!-- User section at bottom -->
 		<div class="absolute right-0 bottom-0 left-0 border-t border-border p-4">
@@ -422,35 +392,11 @@
 				</svg>
 			</button>
 			<a href={resolve('/app')} class="ml-3 flex items-center gap-2">
-				<img src="/demo-logo.webp" alt={data.organization.name} class="h-6" />
+				<img src="/logo.svg" alt={data.organization.name} class="h-6" />
 				<span class="text-sm font-medium text-primary">{data.organization.name}</span>
 			</a>
 		</div>
 
-		{#if data.isPlatform}
-			<!-- Platform mode banner -->
-			<div
-				class="flex items-center border-b border-amber-200 bg-amber-50 px-6 py-2 dark:border-amber-800 dark:bg-amber-950"
-			>
-				<div class="flex items-center gap-2 text-sm text-amber-800 dark:text-amber-200">
-					<svg
-						class="h-4 w-4 shrink-0"
-						fill="none"
-						viewBox="0 0 24 24"
-						stroke="currentColor"
-						aria-hidden="true"
-					>
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							stroke-width="2"
-							d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-						/>
-					</svg>
-					<span>{t(data.locale, 'platform.banner_source_code')}</span>
-				</div>
-			</div>
-		{/if}
 		{#if $navigating}
 			<div in:fade={{ duration: 150 }} class="flex items-center justify-center py-32">
 				<div

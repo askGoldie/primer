@@ -1,21 +1,23 @@
 /**
  * Logout Handler
  *
- * Signs the user out of Supabase Auth (clears session cookies) and
- * redirects to the home page.
+ * Deletes the local session and clears the cookie.
  */
 
 import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types.js';
-import { createSupabaseServerClient } from '$lib/server/supabase.js';
-import { PERSPECTIVE_COOKIE } from '$lib/server/demo/constants.js';
+import {
+	deleteSession,
+	clearSessionCookie,
+	SESSION_COOKIE_NAME
+} from '$lib/server/auth/index.js';
 
 export const load: PageServerLoad = async ({ cookies }) => {
-	// Clear the platform perspective so the next visitor starts fresh
-	cookies.delete(PERSPECTIVE_COOKIE, { path: '/' });
+	const sessionId = cookies.get(SESSION_COOKIE_NAME);
+	if (sessionId) {
+		await deleteSession(sessionId);
+	}
+	clearSessionCookie(cookies);
 
-	const supabase = createSupabaseServerClient(cookies);
-	await supabase.auth.signOut();
-
-	redirect(302, '/');
+	redirect(302, '/auth/login');
 };

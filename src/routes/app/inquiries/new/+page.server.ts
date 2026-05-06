@@ -6,7 +6,25 @@
 
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types.js';
-import { db } from '$lib/server/db.js';
+import { sql, maybeOne, many } from '$lib/server/db.js';
+
+interface MetricRow {
+	id: string;
+	name: string;
+	weight: number | null;
+	current_tier: string | null;
+	node_id: string | null;
+	assigned_by: string | null;
+}
+
+interface NodeRow {
+	id: string;
+	name: string;
+	title: string | null;
+	parent_id: string | null;
+	user_id: string | null;
+	organization_id: string;
+}
 
 export const load: PageServerLoad = async ({ parent }) => {
 	const { userNode } = await parent();
@@ -15,42 +33,36 @@ export const load: PageServerLoad = async ({ parent }) => {
 		redirect(302, '/app/inquiries');
 	}
 
-	// Fetch the full node record to get parentId (layout only exposes a subset of fields)
-	const { data: fullUserNode } = await db
-		.from('org_hierarchy_nodes')
-		.select('*')
-		.eq('id', userNode.id)
-		.single();
+	const fullUserNode = await maybeOne<NodeRow>(sql`
+		select * from org_hierarchy_nodes where id = ${userNode.id}
+	`);
 
-	// Get user's own metrics (for self-inquiry)
-	const { data: ownMetrics } = await db.from('metrics').select('*').eq('node_id', userNode.id);
+	const ownMetrics = await many<MetricRow>(sql`
+		select id, name, weight, current_tier, node_id, assigned_by
+		from metrics where node_id = ${userNode.id}
+	`);
 
-	// Get metrics from other nodes (for peer inquiry)
-	// Only nodes that are connected (siblings or parent)
 	const peerMetrics: {
 		metric: { id: string; name: string; weight: number | null; current_tier: string | null };
 		node: { id: string; name: string };
 	}[] = [];
 
 	if (fullUserNode?.parent_id) {
-		// Get sibling nodes
-		const { data: siblings } = await db
-			.from('org_hierarchy_nodes')
-			.select('*')
-			.eq('parent_id', fullUserNode.parent_id)
-			.neq('id', userNode.id);
+		const siblings = await many<NodeRow>(sql`
+			select * from org_hierarchy_nodes
+			where parent_id = ${fullUserNode.parent_id} and id <> ${userNode.id}
+		`);
 
-		if (siblings?.length) {
+		if (siblings.length > 0) {
 			const siblingById = new Map(siblings.map((s) => [s.id, s]));
-			const { data: siblingMetrics } = await db
-				.from('metrics')
-				.select('*')
-				.in(
-					'node_id',
-					siblings.map((s) => s.id)
-				);
+			const siblingIds = siblings.map((s) => s.id);
+			const siblingMetrics = await many<MetricRow>(sql`
+				select id, name, weight, current_tier, node_id, assigned_by
+				from metrics where node_id = any(${siblingIds}::uuid[])
+			`);
 
-			for (const metric of siblingMetrics ?? []) {
+			for (const metric of siblingMetrics) {
+				if (!metric.node_id) continue;
 				const node = siblingById.get(metric.node_id);
 				if (node) peerMetrics.push({ metric, node });
 			}
@@ -58,7 +70,7 @@ export const load: PageServerLoad = async ({ parent }) => {
 	}
 
 	return {
-		ownMetrics: (ownMetrics ?? []).map((m) => ({
+		ownMetrics: ownMetrics.map((m) => ({
 			id: m.id,
 			name: m.name,
 			weight: m.weight,
@@ -81,27 +93,22 @@ export const actions: Actions = {
 			return fail(403, { error: 'error.generic' });
 		}
 
-		// Fetch organization and user node directly (parent() is not available in actions)
-		const { data: memberships } = await db
-			.from('org_members')
-			.select('*, organizations(*)')
-			.eq('user_id', locals.user.id)
-			.is('removed_at', null)
-			.limit(1);
+		const membership = await maybeOne<{ organization_id: string }>(sql`
+			select organization_id from org_members
+			where user_id = ${locals.user.id} and removed_at is null
+			limit 1
+		`);
 
-		const membership = memberships?.[0];
-		if (!membership?.organizations) {
+		if (!membership) {
 			return fail(403, { error: 'error.generic' });
 		}
 
-		const organization = membership.organizations;
-
-		const { data: userNode } = await db
-			.from('org_hierarchy_nodes')
-			.select('*')
-			.eq('organization_id', organization.id)
-			.eq('user_id', locals.user.id)
-			.single();
+		const userNode = await maybeOne<NodeRow>(sql`
+			select * from org_hierarchy_nodes
+			where organization_id = ${membership.organization_id}
+				and user_id = ${locals.user.id}
+			limit 1
+		`);
 
 		if (!userNode) {
 			return fail(403, { error: 'error.generic' });
@@ -122,69 +129,63 @@ export const actions: Actions = {
 			return fail(400, { error: 'validation.field_required' });
 		}
 
-		// Get target metric to find authority
-		const { data: targetMetric } = await db
-			.from('metrics')
-			.select('*')
-			.eq('id', targetMetricId)
-			.single();
+		const targetMetric = await maybeOne<MetricRow>(sql`
+			select id, name, weight, current_tier, node_id, assigned_by
+			from metrics where id = ${targetMetricId}
+		`);
 
 		if (!targetMetric) {
 			return fail(400, { error: 'error.generic' });
 		}
 
-		// Get the node that owns the target metric
-		const { data: targetNode } = await db
-			.from('org_hierarchy_nodes')
-			.select('*')
-			.eq('id', targetMetric.node_id)
-			.single();
+		const targetNode = await maybeOne<NodeRow>(sql`
+			select * from org_hierarchy_nodes where id = ${targetMetric.node_id}
+		`);
 
 		if (!targetNode) {
 			return fail(400, { error: 'error.generic' });
 		}
 
-		// Authority is the parent of the target node, or the node owner if no parent
 		let authorityId = targetNode.user_id;
 		let authorityNodeId = targetNode.id;
 
 		if (targetNode.parent_id) {
-			const { data: parentNode } = await db
-				.from('org_hierarchy_nodes')
-				.select('*')
-				.eq('id', targetNode.parent_id)
-				.single();
+			const parentNode = await maybeOne<NodeRow>(sql`
+				select * from org_hierarchy_nodes where id = ${targetNode.parent_id}
+			`);
 
-			if (parentNode && parentNode.user_id) {
+			if (parentNode?.user_id) {
 				authorityId = parentNode.user_id;
 				authorityNodeId = parentNode.id;
 			}
 		}
 
 		if (!authorityId) {
-			// Fallback to the metric assignedBy
 			authorityId = targetMetric.assigned_by;
 		}
 
-		// Create the inquiry
-		const { data: inquiry, error } = await db
-			.from('inquiries')
-			.insert({
-				organization_id: organization.id,
-				inquiry_type: inquiryType,
-				filed_by: locals.user.id,
-				filed_by_node_id: userNode.id,
-				target_metric_id: targetMetricId,
-				affected_metric_id: affectedMetricId || targetMetricId,
-				authority_id: authorityId,
-				authority_node_id: authorityNodeId,
-				challenge_type: challengeType,
-				rationale
-			})
-			.select()
-			.single();
+		const inquiry = await maybeOne<{ id: string }>(sql`
+			insert into inquiries (
+				organization_id, inquiry_type, filed_by, filed_by_node_id,
+				target_metric_id, affected_metric_id, authority_id, authority_node_id,
+				challenge_type, rationale
+			)
+			values (
+				${membership.organization_id},
+				${inquiryType},
+				${locals.user.id},
+				${userNode.id},
+				${targetMetricId},
+				${affectedMetricId || targetMetricId},
+				${authorityId},
+				${authorityNodeId},
+				${challengeType},
+				${rationale}
+			)
+			returning id
+		`);
 
-		if (error || !inquiry) {
+		if (!inquiry) {
 			return fail(500, { error: 'error.generic' });
 		}
 

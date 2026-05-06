@@ -7,23 +7,21 @@
 
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types.js';
-import { db } from '$lib/server/db.js';
+import { sql, maybeOne } from '$lib/server/db.js';
 import { t } from '$lib/i18n/index.js';
 
 export const load: PageServerLoad = async ({ locals }) => {
 	if (!locals.user) {
-		redirect(302, '/login');
+		redirect(302, '/auth/login');
 	}
 
-	// Check if user already has an organization
-	const { data: memberships } = await db
-		.from('org_members')
-		.select('*')
-		.eq('user_id', locals.user.id)
-		.is('removed_at', null)
-		.limit(1);
+	const existingMembership = await maybeOne<{ id: string }>(sql`
+		select id from org_members
+		where user_id = ${locals.user.id} and removed_at is null
+		limit 1
+	`);
 
-	if (memberships && memberships.length > 0) {
+	if (existingMembership) {
 		redirect(302, '/app');
 	}
 
@@ -36,8 +34,10 @@ export const actions: Actions = {
 
 		const formData = await request.formData();
 		const orgName = formData.get('orgName')?.toString().trim();
-		const industry = formData.get('industry')?.toString();
-		const cycleCadence = formData.get('cycleCadence')?.toString() as 'monthly' | 'quarterly';
+		const industry = formData.get('industry')?.toString() || null;
+		const cycleCadence = (formData.get('cycleCadence')?.toString() || 'quarterly') as
+			| 'monthly'
+			| 'quarterly';
 		const userName = formData.get('userName')?.toString().trim();
 		const userTitle = formData.get('userTitle')?.toString().trim();
 
@@ -45,39 +45,33 @@ export const actions: Actions = {
 			return fail(400, { error: 'validation.field_required' });
 		}
 
-		// Create organization
-		const { data: org, error } = await db
-			.from('organizations')
-			.insert({
-				name: orgName,
-				industry: industry || null,
-				cycle_cadence: cycleCadence || 'quarterly',
-				created_by: locals.user.id
-			})
-			.select()
-			.single();
+		const org = await maybeOne<{ id: string }>(sql`
+			insert into organizations (name, industry, cycle_cadence, created_by)
+			values (${orgName}, ${industry}, ${cycleCadence}, ${locals.user.id})
+			returning id
+		`);
 
-		if (error || !org) {
+		if (!org) {
 			return fail(500, { error: 'error.generic' });
 		}
 
-		// Add user as owner
-		await db.from('org_members').insert({
-			organization_id: org.id,
-			user_id: locals.user.id,
-			role: 'owner',
-			assigned_by: locals.user.id
-		});
+		await sql`
+			insert into org_members (organization_id, user_id, role, assigned_by)
+			values (${org.id}, ${locals.user.id}, 'owner', ${locals.user.id})
+		`;
 
-		// Create root hierarchy node for the user
-		await db.from('org_hierarchy_nodes').insert({
-			organization_id: org.id,
-			node_type: 'executive_leader',
-			name: userName,
-			title: userTitle || t(locals.locale, 'setup.default_title'),
-			user_id: locals.user.id,
-			created_by: locals.user.id
-		});
+		await sql`
+			insert into org_hierarchy_nodes
+				(organization_id, node_type, name, title, user_id, created_by)
+			values (
+				${org.id},
+				'executive_leader',
+				${userName},
+				${userTitle || t(locals.locale, 'setup.default_title')},
+				${locals.user.id},
+				${locals.user.id}
+			)
+		`;
 
 		redirect(302, '/app');
 	}

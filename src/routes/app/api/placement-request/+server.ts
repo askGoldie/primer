@@ -10,13 +10,11 @@
  *
  * Visible to system_admin, hr_admin, and owner in the admin panel
  * as a "Pending Placements" section.
- *
- * @see /supabase/migrations/20260101000020_onboarding.sql
  */
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types.js';
-import { db } from '$lib/server/db.js';
+import { sql, maybeOne } from '$lib/server/db.js';
 import { t } from '$lib/i18n/index.js';
 
 export const POST: RequestHandler = async ({ locals }) => {
@@ -24,44 +22,37 @@ export const POST: RequestHandler = async ({ locals }) => {
 		error(401, t(locals.locale, 'error.unauthorized'));
 	}
 
-	// Get user's org membership
-	const { data: membership } = await db
-		.from('org_members')
-		.select('organization_id')
-		.eq('user_id', locals.user.id)
-		.is('removed_at', null)
-		.single();
+	const membership = await maybeOne<{ organization_id: string }>(sql`
+		select organization_id from org_members
+		where user_id = ${locals.user.id} and removed_at is null
+		limit 1
+	`);
 
 	if (!membership) {
 		error(400, t(locals.locale, 'error.no_membership'));
 	}
 
-	// Check for existing pending request (idempotent)
-	const { data: existing } = await db
-		.from('placement_requests')
-		.select('id')
-		.eq('organization_id', membership.organization_id)
-		.eq('user_id', locals.user.id)
-		.is('resolved_at', null)
-		.single();
+	const existing = await maybeOne<{ id: string }>(sql`
+		select id from placement_requests
+		where organization_id = ${membership.organization_id}
+			and user_id = ${locals.user.id}
+			and resolved_at is null
+		limit 1
+	`);
 
 	if (existing) {
 		return json({ id: existing.id, status: 'already_pending' });
 	}
 
-	// Create placement request
-	const { data: request, error: insertErr } = await db
-		.from('placement_requests')
-		.insert({
-			organization_id: membership.organization_id,
-			user_id: locals.user.id
-		})
-		.select('id')
-		.single();
+	const inserted = await maybeOne<{ id: string }>(sql`
+		insert into placement_requests (organization_id, user_id)
+		values (${membership.organization_id}, ${locals.user.id})
+		returning id
+	`);
 
-	if (insertErr) {
+	if (!inserted) {
 		error(500, t(locals.locale, 'error.placement_request_failed'));
 	}
 
-	return json({ id: request.id, status: 'created' });
+	return json({ id: inserted.id, status: 'created' });
 };

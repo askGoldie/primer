@@ -20,7 +20,6 @@ import { db } from '$lib/server/db.js';
 import type { TierLevel, GoalType, GoalPriority, GoalStatus } from '$lib/types/index.js';
 import type { GoalDependencyType } from '$lib/types/database.js';
 import { getDirectChildNodeIds } from '$lib/server/hierarchy.js';
-import { PERSPECTIVE_COOKIE } from '$lib/server/demo/constants.js';
 import { loadActionContext } from '$lib/server/action-context.js';
 
 const TIER_LEVELS: TierLevel[] = ['alarm', 'concern', 'content', 'effective', 'optimized'];
@@ -34,23 +33,10 @@ const VALID_CADENCES = ['weekly', 'monthly', 'quarterly', 'semi_annual', 'annual
 
 /**
  * Resolve the hierarchy node for performance write actions.
- * Supports both platform (demo) and customer deployment modes.
  */
 async function resolveActionNode(
-	cookies: import('@sveltejs/kit').Cookies,
 	userId: string
 ): Promise<{ id: string; organization_id: string } | null> {
-	const perspectiveNodeId = cookies.get(PERSPECTIVE_COOKIE);
-
-	if (perspectiveNodeId) {
-		const { data } = await db
-			.from('org_hierarchy_nodes')
-			.select('id, organization_id')
-			.eq('id', perspectiveNodeId)
-			.single();
-		return data ?? null;
-	}
-
 	const { data } = await db
 		.from('org_hierarchy_nodes')
 		.select('id, organization_id')
@@ -485,7 +471,7 @@ export const actions: Actions = {
 	createMetric: async ({ request, locals, cookies }) => {
 		if (!locals.user) return fail(403, { error: 'error.generic' });
 
-		const ctx = await loadActionContext(locals.user.id, cookies);
+		const ctx = await loadActionContext(locals.user.id);
 		if (!ctx || !ctx.userNode || ctx.membership.role === 'viewer')
 			return fail(403, { error: 'error.generic' });
 		const { userNode, organization } = ctx;
@@ -548,7 +534,7 @@ export const actions: Actions = {
 	updateMetric: async ({ request, locals, cookies }) => {
 		if (!locals.user) return fail(403, { error: 'error.generic' });
 
-		const ctx = await loadActionContext(locals.user.id, cookies);
+		const ctx = await loadActionContext(locals.user.id);
 		if (!ctx || ctx.membership.role === 'viewer') return fail(403, { error: 'error.generic' });
 
 		const formData = await request.formData();
@@ -610,7 +596,7 @@ export const actions: Actions = {
 	deleteMetric: async ({ request, locals, cookies }) => {
 		if (!locals.user) return fail(403, { error: 'error.generic' });
 
-		const ctx = await loadActionContext(locals.user.id, cookies);
+		const ctx = await loadActionContext(locals.user.id);
 		if (!ctx || ctx.membership.role === 'viewer') return fail(403, { error: 'error.generic' });
 
 		const formData = await request.formData();
@@ -628,7 +614,7 @@ export const actions: Actions = {
 	updateWeights: async ({ request, locals, cookies }) => {
 		if (!locals.user) return fail(403, { error: 'error.generic' });
 
-		const ctx = await loadActionContext(locals.user.id, cookies);
+		const ctx = await loadActionContext(locals.user.id);
 		if (!ctx || ctx.membership.role === 'viewer') return fail(403, { error: 'error.generic' });
 
 		const formData = await request.formData();
@@ -658,7 +644,7 @@ export const actions: Actions = {
 	submitMetric: async ({ request, locals, cookies }) => {
 		if (!locals.user) return fail(403, { error: 'error.generic' });
 
-		const ctx = await loadActionContext(locals.user.id, cookies);
+		const ctx = await loadActionContext(locals.user.id);
 		if (!ctx || ctx.membership.role === 'viewer') return fail(403, { error: 'error.generic' });
 
 		const formData = await request.formData();
@@ -686,7 +672,7 @@ export const actions: Actions = {
 	recordTier: async ({ request, locals, cookies }) => {
 		if (!locals.user) return fail(403, { error: 'error.generic' });
 
-		const ctx = await loadActionContext(locals.user.id, cookies);
+		const ctx = await loadActionContext(locals.user.id);
 		if (!ctx || ctx.membership.role === 'viewer') return fail(403, { error: 'error.generic' });
 
 		const formData = await request.formData();
@@ -710,7 +696,7 @@ export const actions: Actions = {
 	createGoal: async ({ request, locals, cookies }) => {
 		if (!locals.user) return fail(403, { error: 'error.generic' });
 
-		const ctx = await loadActionContext(locals.user.id, cookies);
+		const ctx = await loadActionContext(locals.user.id);
 		if (!ctx || !ctx.userNode) return fail(400, { error: 'error.generic' });
 		const { organization, userNode } = ctx;
 
@@ -756,7 +742,7 @@ export const actions: Actions = {
 	updateGoal: async ({ request, locals, cookies }) => {
 		if (!locals.user) return fail(403, { error: 'error.generic' });
 
-		const ctx = await loadActionContext(locals.user.id, cookies);
+		const ctx = await loadActionContext(locals.user.id);
 		if (!ctx || !ctx.userNode) return fail(400, { error: 'error.generic' });
 		const { userNode } = ctx;
 
@@ -839,7 +825,7 @@ export const actions: Actions = {
 	deleteGoal: async ({ request, locals, cookies }) => {
 		if (!locals.user) return fail(403, { error: 'error.generic' });
 
-		const ctx = await loadActionContext(locals.user.id, cookies);
+		const ctx = await loadActionContext(locals.user.id);
 		if (!ctx || !ctx.userNode) return fail(400, { error: 'error.generic' });
 		const { userNode } = ctx;
 
@@ -897,7 +883,7 @@ export const actions: Actions = {
 	cascade: async ({ request, locals, cookies }) => {
 		if (!locals.user) return fail(403, { error: 'error.generic' });
 
-		const ctx = await loadActionContext(locals.user.id, cookies);
+		const ctx = await loadActionContext(locals.user.id);
 		if (!ctx || !ctx.userNode || !ctx.hasDirectReports)
 			return fail(400, { error: 'error.generic' });
 		const { organization, userNode } = ctx;
@@ -982,7 +968,7 @@ export const actions: Actions = {
 			.single();
 		if (mem?.role === 'viewer') return fail(403, { error: 'error.generic' });
 
-		const userNode = await resolveActionNode(cookies, locals.user.id);
+		const userNode = await resolveActionNode(locals.user.id);
 		if (!userNode) return fail(400, { error: 'no_node' });
 
 		const formData = await request.formData();
@@ -1067,7 +1053,7 @@ export const actions: Actions = {
 			.single();
 		if (mem?.role === 'viewer') return fail(403, { error: 'error.generic' });
 
-		const userNode = await resolveActionNode(cookies, locals.user.id);
+		const userNode = await resolveActionNode(locals.user.id);
 		if (!userNode) return fail(400, { error: 'no_node' });
 
 		const formData = await request.formData();

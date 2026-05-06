@@ -25,7 +25,7 @@
  * @see /supabase/migrations/20260101000019_role_expansion.sql
  */
 
-import { db } from '$lib/server/db.js';
+import { sql, maybeOne } from '$lib/server/db.js';
 import type { OrgRole } from '$lib/types/database.js';
 
 // ============================================================================
@@ -162,11 +162,9 @@ export async function getAncestorIds(nodeId: string): Promise<string[]> {
 	let currentId: string | null = nodeId;
 
 	while (currentId) {
-		const { data: row }: { data: { parent_id: string | null } | null } = await db
-			.from('org_hierarchy_nodes')
-			.select('parent_id')
-			.eq('id', currentId)
-			.single();
+		const row: { parent_id: string | null } | null = await maybeOne(sql`
+			select parent_id from org_hierarchy_nodes where id = ${currentId}
+		`);
 
 		if (!row?.parent_id) break;
 		ancestors.push(row.parent_id);
@@ -185,28 +183,26 @@ export async function getUserContext(userId: string): Promise<{
 	organizationId: string;
 	role: OrgRole;
 } | null> {
-	const { data: node } = await db
-		.from('org_hierarchy_nodes')
-		.select('id, organization_id')
-		.eq('user_id', userId)
-		.single();
+	const node = await maybeOne<{ id: string; organization_id: string }>(sql`
+		select id, organization_id from org_hierarchy_nodes where user_id = ${userId} limit 1
+	`);
 
 	if (!node) return null;
 
-	const { data: membership } = await db
-		.from('org_members')
-		.select('role')
-		.eq('user_id', userId)
-		.eq('organization_id', node.organization_id)
-		.is('removed_at', null)
-		.single();
+	const membership = await maybeOne<{ role: OrgRole }>(sql`
+		select role from org_members
+		where user_id = ${userId}
+			and organization_id = ${node.organization_id}
+			and removed_at is null
+		limit 1
+	`);
 
 	if (!membership) return null;
 
 	return {
 		nodeId: node.id,
 		organizationId: node.organization_id,
-		role: membership.role as OrgRole
+		role: membership.role
 	};
 }
 

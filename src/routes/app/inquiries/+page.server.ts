@@ -6,29 +6,63 @@
  */
 
 import type { PageServerLoad } from './$types.js';
-import { db } from '$lib/server/db.js';
+import { sql, many } from '$lib/server/db.js';
+
+interface InquiryRow {
+	id: string;
+	inquiry_type: string;
+	status: string;
+	challenge_type: string;
+	rationale: string;
+	resolution_summary: string | null;
+	resolution_action: string | null;
+	filed_at: string;
+	resolved_at: string | null;
+	metric_id: string | null;
+	metric_name: string | null;
+	filed_by_id: string | null;
+	filed_by_name: string | null;
+	filed_by_node_id: string | null;
+	filed_by_node_name: string | null;
+	filed_by_node_title: string | null;
+}
 
 export const load: PageServerLoad = async ({ parent, locals }) => {
 	const { organization, userNode, membership } = await parent();
 
-	// Build the query - owners see all, others see only their own + where they are authority
-	let query = db
-		.from('inquiries')
-		.select(
-			'*, metrics!inquiries_target_metric_id_fkey(id, name), filed_by_user:users!inquiries_filed_by_fkey(id, name), filed_by_node:org_hierarchy_nodes!inquiries_filed_by_node_id_fkey(id, name, title)'
-		)
-		.eq('organization_id', organization.id)
-		.order('filed_at', { ascending: false })
-		.limit(50);
+	const isPrivileged = membership.role === 'owner' || membership.role === 'system_admin';
+	const userId = locals.user!.id;
 
-	if (membership.role !== 'owner' && membership.role !== 'system_admin') {
-		query = query.or(`filed_by.eq.${locals.user!.id},authority_id.eq.${locals.user!.id}`);
-	}
-
-	const { data: allInquiries } = await query;
+	const allInquiries = await many<InquiryRow>(sql`
+		select
+			i.id,
+			i.inquiry_type,
+			i.status,
+			i.challenge_type,
+			i.rationale,
+			i.resolution_summary,
+			i.resolution_action,
+			i.filed_at,
+			i.resolved_at,
+			m.id as metric_id,
+			m.name as metric_name,
+			fbu.id as filed_by_id,
+			fbu.name as filed_by_name,
+			fbn.id as filed_by_node_id,
+			fbn.name as filed_by_node_name,
+			fbn.title as filed_by_node_title
+		from inquiries i
+		left join metrics m on m.id = i.target_metric_id
+		left join users fbu on fbu.id = i.filed_by
+		left join org_hierarchy_nodes fbn on fbn.id = i.filed_by_node_id
+		where i.organization_id = ${organization.id}
+			${isPrivileged ? sql`` : sql`and (i.filed_by = ${userId} or i.authority_id = ${userId})`}
+		order by i.filed_at desc
+		limit 50
+	`);
 
 	return {
-		inquiries: (allInquiries ?? []).map((row) => ({
+		inquiries: allInquiries.map((row) => ({
 			id: row.id,
 			type: row.inquiry_type,
 			status: row.status,
@@ -37,19 +71,19 @@ export const load: PageServerLoad = async ({ parent, locals }) => {
 			resolutionSummary: row.resolution_summary,
 			resolutionAction: row.resolution_action,
 			filedAt: row.filed_at,
-			resolvedAt: row.resolved_at || null,
+			resolvedAt: row.resolved_at,
 			targetMetric: {
-				id: (row.metrics as { id: string; name: string })?.id,
-				name: (row.metrics as { id: string; name: string })?.name
+				id: row.metric_id,
+				name: row.metric_name
 			},
 			filedBy: {
-				id: (row.filed_by_user as { id: string; name: string })?.id,
-				name: (row.filed_by_user as { id: string; name: string })?.name
+				id: row.filed_by_id,
+				name: row.filed_by_name
 			},
 			filedByNode: {
-				id: (row.filed_by_node as { id: string; name: string; title: string | null })?.id,
-				name: (row.filed_by_node as { id: string; name: string; title: string | null })?.name,
-				title: (row.filed_by_node as { id: string; name: string; title: string | null })?.title
+				id: row.filed_by_node_id,
+				name: row.filed_by_node_name,
+				title: row.filed_by_node_title
 			}
 		})),
 		canFileInquiry: !!userNode

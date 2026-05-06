@@ -5,9 +5,36 @@
  * All authentication is email/password based (no OAuth at launch).
  */
 
-import { db } from '$lib/server/db.js';
+import { sql, maybeOne } from '$lib/server/db.js';
 import { createHash, randomBytes, timingSafeEqual, scrypt } from 'crypto';
 import type { Cookies } from '@sveltejs/kit';
+
+interface SessionRow {
+	id: string;
+	user_id: string;
+	expires_at: string;
+}
+
+interface UserRow {
+	id: string;
+	email: string;
+	name: string;
+	password_hash: string | null;
+	locale: string | null;
+	is_admin: boolean | null;
+	email_verified: boolean | null;
+	deactivated_at: string | null;
+	created_at: string;
+	updated_at: string;
+}
+
+interface VerificationTokenRow {
+	id: string;
+	user_id: string;
+	token_hash: string;
+	expires_at: string;
+	used_at: string | null;
+}
 
 /**
  * Session cookie name
@@ -92,11 +119,10 @@ export async function createSession(userId: string): Promise<string> {
 	const sessionId = generateToken();
 	const expiresAt = new Date(Date.now() + SESSION_DURATION_MS);
 
-	await db.from('sessions').insert({
-		id: sessionId,
-		user_id: userId,
-		expires_at: expiresAt.toISOString()
-	});
+	await sql`
+		insert into sessions (id, user_id, expires_at)
+		values (${sessionId}, ${userId}, ${expiresAt.toISOString()})
+	`;
 
 	return sessionId;
 }
@@ -104,22 +130,20 @@ export async function createSession(userId: string): Promise<string> {
 /**
  * Validate a session and return the user if valid
  */
-export async function validateSession(sessionId: string) {
-	const { data: session } = await db
-		.from('sessions')
-		.select('*')
-		.eq('id', sessionId)
-		.gt('expires_at', new Date().toISOString())
-		.single();
+export async function validateSession(
+	sessionId: string
+): Promise<{ session: SessionRow; user: UserRow } | null> {
+	const session = await maybeOne<SessionRow>(sql`
+		select * from sessions
+		where id = ${sessionId} and expires_at > now()
+	`);
 
 	if (!session) return null;
 
-	const { data: user } = await db
-		.from('users')
-		.select('*')
-		.eq('id', session.user_id)
-		.is('deactivated_at', null)
-		.single();
+	const user = await maybeOne<UserRow>(sql`
+		select * from users
+		where id = ${session.user_id} and deactivated_at is null
+	`);
 
 	if (!user) return null;
 
@@ -130,14 +154,14 @@ export async function validateSession(sessionId: string) {
  * Delete a session (logout)
  */
 export async function deleteSession(sessionId: string): Promise<void> {
-	await db.from('sessions').delete().eq('id', sessionId);
+	await sql`delete from sessions where id = ${sessionId}`;
 }
 
 /**
  * Delete all sessions for a user (e.g., after password reset)
  */
 export async function deleteAllUserSessions(userId: string): Promise<void> {
-	await db.from('sessions').delete().eq('user_id', userId);
+	await sql`delete from sessions where user_id = ${userId}`;
 }
 
 /**
@@ -168,11 +192,10 @@ export async function createVerificationToken(userId: string): Promise<string> {
 	const tokenHash = hashToken(token);
 	const expiresAt = new Date(Date.now() + VERIFICATION_TOKEN_EXPIRY_MS);
 
-	await db.from('email_verification_tokens').insert({
-		user_id: userId,
-		token_hash: tokenHash,
-		expires_at: expiresAt.toISOString()
-	});
+	await sql`
+		insert into email_verification_tokens (user_id, token_hash, expires_at)
+		values (${userId}, ${tokenHash}, ${expiresAt.toISOString()})
+	`;
 
 	return token;
 }
@@ -180,27 +203,20 @@ export async function createVerificationToken(userId: string): Promise<string> {
 /**
  * Verify an email verification token
  */
-export async function verifyEmailToken(token: string) {
+export async function verifyEmailToken(token: string): Promise<VerificationTokenRow | null> {
 	const tokenHash = hashToken(token);
 
-	const { data: verification } = await db
-		.from('email_verification_tokens')
-		.select('*')
-		.eq('token_hash', tokenHash)
-		.gt('expires_at', new Date().toISOString())
-		.is('used_at', null)
-		.single();
+	const verification = await maybeOne<VerificationTokenRow>(sql`
+		select * from email_verification_tokens
+		where token_hash = ${tokenHash}
+			and expires_at > now()
+			and used_at is null
+	`);
 
 	if (!verification) return null;
 
-	// Mark as used
-	await db
-		.from('email_verification_tokens')
-		.update({ used_at: new Date().toISOString() })
-		.eq('id', verification.id);
-
-	// Mark user as verified
-	await db.from('users').update({ email_verified: true }).eq('id', verification.user_id);
+	await sql`update email_verification_tokens set used_at = now() where id = ${verification.id}`;
+	await sql`update users set email_verified = true where id = ${verification.user_id}`;
 
 	return verification;
 }
@@ -213,11 +229,10 @@ export async function createPasswordResetToken(userId: string): Promise<string> 
 	const tokenHash = hashToken(token);
 	const expiresAt = new Date(Date.now() + PASSWORD_RESET_EXPIRY_MS);
 
-	await db.from('password_reset_tokens').insert({
-		user_id: userId,
-		token_hash: tokenHash,
-		expires_at: expiresAt.toISOString()
-	});
+	await sql`
+		insert into password_reset_tokens (user_id, token_hash, expires_at)
+		values (${userId}, ${tokenHash}, ${expiresAt.toISOString()})
+	`;
 
 	return token;
 }
@@ -225,18 +240,17 @@ export async function createPasswordResetToken(userId: string): Promise<string> 
 /**
  * Verify a password reset token
  */
-export async function verifyPasswordResetToken(token: string) {
+export async function verifyPasswordResetToken(
+	token: string
+): Promise<VerificationTokenRow | null> {
 	const tokenHash = hashToken(token);
 
-	const { data: resetToken } = await db
-		.from('password_reset_tokens')
-		.select('*')
-		.eq('token_hash', tokenHash)
-		.gt('expires_at', new Date().toISOString())
-		.is('used_at', null)
-		.single();
-
-	return resetToken || null;
+	return maybeOne<VerificationTokenRow>(sql`
+		select * from password_reset_tokens
+		where token_hash = ${tokenHash}
+			and expires_at > now()
+			and used_at is null
+	`);
 }
 
 /**
@@ -248,14 +262,9 @@ export async function completePasswordReset(token: string, newPassword: string):
 
 	const passwordHash = await hashPassword(newPassword);
 
-	// Update password and mark token as used
-	await db.from('users').update({ password_hash: passwordHash }).eq('id', resetToken.user_id);
-	await db
-		.from('password_reset_tokens')
-		.update({ used_at: new Date().toISOString() })
-		.eq('id', resetToken.id);
+	await sql`update users set password_hash = ${passwordHash} where id = ${resetToken.user_id}`;
+	await sql`update password_reset_tokens set used_at = now() where id = ${resetToken.id}`;
 
-	// Invalidate all existing sessions
 	await deleteAllUserSessions(resetToken.user_id);
 
 	return true;

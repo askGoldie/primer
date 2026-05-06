@@ -1,53 +1,53 @@
 /**
  * Reset Password Page Server
  *
- * The user arrives here after clicking the password reset link in their
- * email. The `/auth/callback` handler already exchanged the token for a
- * session - this page just presents the new-password form and calls
- * `updateUser` to apply it.
+ * The user arrives here from the link in the password-reset email,
+ * carrying a `token` query parameter. POST submits the new password and
+ * the token; on success the user's password is updated and all existing
+ * sessions are invalidated.
  *
- * Because the Supabase session is already active at this point (set by
- * /auth/callback), `locals.user` is populated and we can call `updateUser`
- * directly without a separate token parameter.
+ * Phase 4 will add a proper UI page; for now the GET load redirects to
+ * /auth/login (the form would need to know the token).
  */
 
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types.js';
-import { createSupabaseServerClient } from '$lib/server/supabase.js';
-
-const MIN_PASSWORD_LENGTH = 8;
+import {
+	completePasswordReset,
+	validatePassword,
+	MIN_PASSWORD_LENGTH
+} from '$lib/server/auth/index.js';
 
 export const load: PageServerLoad = async ({ url }) => {
-	// Canonical reset-password page is now /web/reset-password
-	redirect(302, `/web/reset-password${url.search}`);
+	redirect(302, `/auth/login${url.search}`);
 };
 
 export const actions: Actions = {
-	default: async ({ request, cookies, locals }) => {
-		if (!locals.user) {
-			return fail(400, { error: 'auth.verification_expired' });
-		}
-
+	default: async ({ request, url }) => {
 		const formData = await request.formData();
+		const token = formData.get('token')?.toString() || url.searchParams.get('token');
 		const password = formData.get('password')?.toString();
 		const confirmPassword = formData.get('confirmPassword')?.toString();
+
+		if (!token) {
+			return fail(400, { error: 'auth.verification_expired' });
+		}
 
 		if (!password) {
 			return fail(400, { error: 'validation.field_required' });
 		}
 
-		if (password.length < MIN_PASSWORD_LENGTH) {
-			return fail(400, { error: 'validation.password_min' });
+		const passwordCheck = validatePassword(password);
+		if (!passwordCheck.valid) {
+			return fail(400, { error: 'validation.password_min', minLength: MIN_PASSWORD_LENGTH });
 		}
 
 		if (password !== confirmPassword) {
 			return fail(400, { error: 'validation.password_match' });
 		}
 
-		const supabase = createSupabaseServerClient(cookies);
-		const { error } = await supabase.auth.updateUser({ password });
-
-		if (error) {
+		const ok = await completePasswordReset(token, password);
+		if (!ok) {
 			return fail(400, { error: 'auth.verification_expired' });
 		}
 
