@@ -17,7 +17,7 @@
 
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types.js';
-import { db } from '$lib/server/db.js';
+import { sql, maybeOne, many, one } from '$lib/server/db.js';
 import type { TierLevel, GoalType, GoalPriority, GoalStatus } from '$lib/types/index.js';
 import type { GoalDependencyType } from '$lib/types/database.js';
 import { getDirectChildNodeIds } from '$lib/server/hierarchy.js';
@@ -38,12 +38,9 @@ const VALID_CADENCES = ['weekly', 'monthly', 'quarterly', 'semi_annual', 'annual
 async function resolveActionNode(
 	userId: string
 ): Promise<{ id: string; organization_id: string } | null> {
-	const { data } = await db
-		.from('org_hierarchy_nodes')
-		.select('id, organization_id')
-		.eq('user_id', userId)
-		.single();
-	return data ?? null;
+	return await maybeOne<{ id: string; organization_id: string }>(sql`
+		select id, organization_id from org_hierarchy_nodes where user_id = ${userId} limit 1
+	`);
 }
 
 /** Shape of a goal returned to the client */
@@ -97,12 +94,10 @@ interface DependencyRow {
  * Returns true if the metric has a locked_by_snapshot_id set.
  */
 async function isMetricLocked(metricId: string): Promise<boolean> {
-	const { data } = await db
-		.from('metrics')
-		.select('locked_by_snapshot_id')
-		.eq('id', metricId)
-		.single();
-	return !!data?.locked_by_snapshot_id;
+	const row = await maybeOne<{ locked_by_snapshot_id: string | null }>(sql`
+		select locked_by_snapshot_id from metrics where id = ${metricId}
+	`);
+	return !!row?.locked_by_snapshot_id;
 }
 
 export const load = async ({ parent }: Parameters<PageServerLoad>[0]) => {
@@ -113,29 +108,46 @@ export const load = async ({ parent }: Parameters<PageServerLoad>[0]) => {
 	}
 
 	// ── Metrics (Primer quintile stack) ───────────────────────────────────────
-	const { data: nodeMetrics } = await db
-		.from('metrics')
-		.select('*')
-		.eq('node_id', userNode.id)
-		.order('sort_order', { ascending: true });
+	const nodeMetrics = await many<{
+		id: string;
+		name: string;
+		description: string | null;
+		measurement_type: string;
+		indicator_type: string;
+		origin: string;
+		weight: number | null;
+		current_tier: string | null;
+		sort_order: number;
+		submitted_at: string | null;
+		approved_at: string | null;
+		locked_by_snapshot_id: string | null;
+		performance_cadence: string | null;
+	}>(sql`
+		select * from metrics where node_id = ${userNode.id} order by sort_order asc
+	`);
 
 	// Fetch thresholds for all metrics in a single query, then group by metric_id.
-	const metricIds = (nodeMetrics ?? []).map((m) => m.id);
+	const metricIds = nodeMetrics.map((m) => m.id);
 	const thresholdsByMetric = new Map<string, { tier: string; description: string | null }[]>();
 	if (metricIds.length > 0) {
-		const { data: allThresholds } = await db
-			.from('metric_thresholds')
-			.select('metric_id, tier, description')
-			.in('metric_id', metricIds);
+		const allThresholds = await many<{
+			metric_id: string;
+			tier: string;
+			description: string | null;
+		}>(sql`
+			select metric_id, tier, description
+			from metric_thresholds
+			where metric_id in ${sql(metricIds)}
+		`);
 
-		for (const t of allThresholds ?? []) {
+		for (const t of allThresholds) {
 			const list = thresholdsByMetric.get(t.metric_id) ?? [];
 			list.push({ tier: t.tier, description: t.description });
 			thresholdsByMetric.set(t.metric_id, list);
 		}
 	}
 
-	const metricsWithThresholds = (nodeMetrics ?? []).map((metric) => {
+	const metricsWithThresholds = nodeMetrics.map((metric) => {
 		const thresholds = thresholdsByMetric.get(metric.id) ?? [];
 		return {
 			id: metric.id,
@@ -145,7 +157,7 @@ export const load = async ({ parent }: Parameters<PageServerLoad>[0]) => {
 			indicatorType: metric.indicator_type,
 			origin: metric.origin,
 			weight: metric.weight,
-			currentTier: metric.current_tier,
+			currentTier: metric.current_tier as TierLevel | null,
 			sortOrder: metric.sort_order,
 			submittedAt: metric.submitted_at || null,
 			approvedAt: metric.approved_at || null,
@@ -157,16 +169,33 @@ export const load = async ({ parent }: Parameters<PageServerLoad>[0]) => {
 		};
 	});
 
-	const totalWeight = (nodeMetrics ?? []).reduce((sum, m) => sum + (m.weight || 0), 0);
+	const totalWeight = nodeMetrics.reduce((sum, m) => sum + (m.weight || 0), 0);
 
 	// ── My Goals ─────────────────────────────────────────────────────────────
-	const { data: myGoals } = await db
-		.from('org_goals')
-		.select('*')
-		.eq('hierarchy_node_id', userNode.id)
-		.order('created_at', { ascending: true });
+	const myGoals = await many<{
+		id: string;
+		title: string;
+		description: string | null;
+		priority: string;
+		status: string;
+		goal_type: string;
+		goal_origin: string | null;
+		source_goal_id: string | null;
+		target_tier: string | null;
+		actual_tier: string | null;
+		target_value: Record<string, unknown> | null;
+		actual_value: Record<string, unknown> | null;
+		due_date: string | null;
+		assigned_by: string | null;
+		snapshot_id: string | null;
+		created_at: string;
+	}>(sql`
+		select * from org_goals
+		where hierarchy_node_id = ${userNode.id}
+		order by created_at asc
+	`);
 
-	const goals: GoalRow[] = (myGoals ?? []).map((g) => ({
+	const goals: GoalRow[] = myGoals.map((g) => ({
 		id: g.id,
 		title: g.title,
 		description: g.description,
@@ -192,50 +221,48 @@ export const load = async ({ parent }: Parameters<PageServerLoad>[0]) => {
 	let dependencies: DependencyRow[] = [];
 
 	if (goalIds.length > 0) {
-		const { data: deps } = await db
-			.from('goal_dependencies')
-			.select(
-				'*, depends_on:org_goals!goal_dependencies_depends_on_goal_id_fkey(title, hierarchy_node_id)'
-			)
-			.in('goal_id', goalIds);
+		const deps = await many<{
+			id: string;
+			goal_id: string;
+			depends_on_goal_id: string;
+			dependency_type: string;
+			description: string | null;
+			depends_on_title: string | null;
+			depends_on_node_id: string | null;
+		}>(sql`
+			select
+				d.id, d.goal_id, d.depends_on_goal_id, d.dependency_type, d.description,
+				g.title              as depends_on_title,
+				g.hierarchy_node_id  as depends_on_node_id
+			from goal_dependencies d
+			left join org_goals g on g.id = d.depends_on_goal_id
+			where d.goal_id in ${sql(goalIds)}
+		`);
 
-		if (deps) {
+		if (deps.length > 0) {
 			const depNodeIds = deps
-				.map((d) => {
-					const target = d.depends_on as {
-						title: string;
-						hierarchy_node_id: string | null;
-					} | null;
-					return target?.hierarchy_node_id;
-				})
+				.map((d) => d.depends_on_node_id)
 				.filter((id): id is string => !!id);
 
 			let nodeNameMap: Record<string, string> = {};
 			if (depNodeIds.length > 0) {
-				const { data: nodes } = await db
-					.from('org_hierarchy_nodes')
-					.select('id, name')
-					.in('id', depNodeIds);
-				nodeNameMap = Object.fromEntries((nodes ?? []).map((n) => [n.id, n.name]));
+				const nodes = await many<{ id: string; name: string }>(sql`
+					select id, name from org_hierarchy_nodes where id in ${sql(depNodeIds)}
+				`);
+				nodeNameMap = Object.fromEntries(nodes.map((n) => [n.id, n.name]));
 			}
 
-			dependencies = deps.map((d) => {
-				const target = d.depends_on as {
-					title: string;
-					hierarchy_node_id: string | null;
-				} | null;
-				return {
-					id: d.id,
-					goalId: d.goal_id,
-					dependsOnGoalId: d.depends_on_goal_id,
-					dependencyType: d.dependency_type,
-					description: d.description,
-					dependsOnTitle: target?.title ?? null,
-					dependsOnNodeName: target?.hierarchy_node_id
-						? (nodeNameMap[target.hierarchy_node_id] ?? null)
-						: null
-				};
-			});
+			dependencies = deps.map((d) => ({
+				id: d.id,
+				goalId: d.goal_id,
+				dependsOnGoalId: d.depends_on_goal_id,
+				dependencyType: d.dependency_type,
+				description: d.description,
+				dependsOnTitle: d.depends_on_title ?? null,
+				dependsOnNodeName: d.depends_on_node_id
+					? (nodeNameMap[d.depends_on_node_id] ?? null)
+					: null
+			}));
 		}
 	}
 
@@ -244,25 +271,45 @@ export const load = async ({ parent }: Parameters<PageServerLoad>[0]) => {
 
 	if (!hasDirectReports && userNode) {
 		// Fetch the current node and its parent (via join) in one round-trip.
-		const { data: currentNodeData } = await db
-			.from('org_hierarchy_nodes')
-			.select('parent_id, parent:org_hierarchy_nodes!parent_id(id, name)')
-			.eq('id', userNode.id)
-			.single();
+		const currentNodeData = await maybeOne<{
+			parent_id: string | null;
+			parent_node_id: string | null;
+			parent_node_name: string | null;
+		}>(sql`
+			select
+				n.parent_id,
+				p.id   as parent_node_id,
+				p.name as parent_node_name
+			from org_hierarchy_nodes n
+			left join org_hierarchy_nodes p on p.id = n.parent_id
+			where n.id = ${userNode.id}
+		`);
 
-		if (currentNodeData?.parent_id) {
-			const parentNodeData = currentNodeData.parent as { id: string; name: string } | null;
+		if (currentNodeData?.parent_id && currentNodeData.parent_node_id) {
+			const parentNodeData = {
+				id: currentNodeData.parent_node_id,
+				name: currentNodeData.parent_node_name ?? ''
+			};
 
-			if (parentNodeData) {
-				const { data: pGoals } = await db
-					.from('org_goals')
-					.select(
-						'id, title, priority, status, goal_type, target_tier, actual_tier, due_date, created_at'
-					)
-					.eq('hierarchy_node_id', parentNodeData.id)
-					.order('created_at', { ascending: true });
+			{
+				const pGoals = await many<{
+					id: string;
+					title: string;
+					priority: string;
+					status: string;
+					goal_type: string;
+					target_tier: string | null;
+					actual_tier: string | null;
+					due_date: string | null;
+					created_at: string;
+				}>(sql`
+					select id, title, priority, status, goal_type, target_tier, actual_tier, due_date, created_at
+					from org_goals
+					where hierarchy_node_id = ${parentNodeData.id}
+					order by created_at asc
+				`);
 
-				parentGoals = (pGoals ?? []).map((g) => ({
+				parentGoals = pGoals.map((g) => ({
 					id: g.id,
 					title: g.title,
 					description: null, // title-only visibility
@@ -290,14 +337,15 @@ export const load = async ({ parent }: Parameters<PageServerLoad>[0]) => {
 	let teamGoals: GoalRow[] = [];
 
 	if (hasDirectReports) {
-		const { data: allNodes } = await db
-			.from('org_hierarchy_nodes')
-			.select('id, name, parent_id')
-			.eq('organization_id', organization.id);
+		const allNodes = await many<{ id: string; name: string; parent_id: string | null }>(sql`
+			select id, name, parent_id
+			from org_hierarchy_nodes
+			where organization_id = ${organization.id}
+		`);
 
 		const descendantIds: string[] = [];
 		function collectDescendants(parentId: string) {
-			for (const node of allNodes ?? []) {
+			for (const node of allNodes) {
 				if (node.parent_id === parentId) {
 					descendantIds.push(node.id);
 					collectDescendants(node.id);
@@ -307,35 +355,53 @@ export const load = async ({ parent }: Parameters<PageServerLoad>[0]) => {
 		collectDescendants(userNode.id);
 
 		if (descendantIds.length > 0) {
-			const { data: descGoals } = await db
-				.from('org_goals')
-				.select('*, org_hierarchy_nodes!org_goals_hierarchy_node_id_fkey(name)')
-				.in('hierarchy_node_id', descendantIds)
-				.order('created_at', { ascending: true });
+			const descGoals = await many<{
+				id: string;
+				title: string;
+				description: string | null;
+				priority: string;
+				status: string;
+				goal_type: string;
+				goal_origin: string | null;
+				source_goal_id: string | null;
+				target_tier: string | null;
+				actual_tier: string | null;
+				target_value: Record<string, unknown> | null;
+				actual_value: Record<string, unknown> | null;
+				due_date: string | null;
+				assigned_by: string | null;
+				snapshot_id: string | null;
+				created_at: string;
+				hierarchy_node_id: string;
+				node_name: string | null;
+			}>(sql`
+				select g.*, n.name as node_name
+				from org_goals g
+				left join org_hierarchy_nodes n on n.id = g.hierarchy_node_id
+				where g.hierarchy_node_id in ${sql(descendantIds)}
+				order by g.created_at asc
+			`);
 
-			teamGoals = (descGoals ?? []).map((g) => {
-				const nodeData = g.org_hierarchy_nodes as { name: string } | null;
-				return {
-					id: g.id,
-					title: g.title,
-					description: g.description,
-					priority: g.priority,
-					status: g.status,
-					goalType: g.goal_type,
-					goalOrigin: g.goal_origin ?? 'self_created',
-					sourceGoalId: g.source_goal_id ?? null,
-					targetTier: g.target_tier,
-					actualTier: g.actual_tier,
-					targetValue: g.target_value,
-					actualValue: g.actual_value,
-					dueDate: g.due_date,
-					assignedBy: g.assigned_by,
-					snapshotId: g.snapshot_id,
-					createdAt: g.created_at,
-					nodeName: nodeData?.name ?? null,
-					nodeId: g.hierarchy_node_id
-				};
-			});
+			teamGoals = descGoals.map((g) => ({
+				id: g.id,
+				title: g.title,
+				description: g.description,
+				priority: g.priority,
+				status: g.status,
+				goalType: g.goal_type,
+				goalOrigin: g.goal_origin ?? 'self_created',
+				sourceGoalId: g.source_goal_id ?? null,
+				targetTier: g.target_tier,
+				actualTier: g.actual_tier,
+				targetValue: g.target_value,
+				actualValue: g.actual_value,
+				dueDate: g.due_date,
+				assignedBy: g.assigned_by,
+				snapshotId: g.snapshot_id,
+				createdAt: g.created_at,
+				nodeName: g.node_name ?? null,
+				nodeId: g.hierarchy_node_id
+			}));
 		}
 	}
 
@@ -347,86 +413,111 @@ export const load = async ({ parent }: Parameters<PageServerLoad>[0]) => {
 
 	if (hasDirectReports && goals.length > 0) {
 		const myGoalIds = goals.map((g) => g.id);
-		const { data: cascadedGoals } = await db
-			.from('org_goals')
-			.select('source_goal_id, status')
-			.in('source_goal_id', myGoalIds);
+		const cascadedGoals = await many<{ source_goal_id: string | null; status: string }>(sql`
+			select source_goal_id, status
+			from org_goals
+			where source_goal_id in ${sql(myGoalIds)}
+		`);
 
-		if (cascadedGoals) {
-			for (const cg of cascadedGoals) {
-				if (!cg.source_goal_id) continue;
-				if (!cascadeStatus[cg.source_goal_id]) {
-					cascadeStatus[cg.source_goal_id] = { total: 0, accepted: 0, deferred: 0, pending: 0 };
-				}
-				const entry = cascadeStatus[cg.source_goal_id];
-				entry.total++;
-				if (cg.status === 'in_progress' || cg.status === 'completed') {
-					entry.accepted++;
-				} else if (cg.status === 'deferred') {
-					entry.deferred++;
-				} else {
-					entry.pending++;
-				}
+		for (const cg of cascadedGoals) {
+			if (!cg.source_goal_id) continue;
+			if (!cascadeStatus[cg.source_goal_id]) {
+				cascadeStatus[cg.source_goal_id] = { total: 0, accepted: 0, deferred: 0, pending: 0 };
+			}
+			const entry = cascadeStatus[cg.source_goal_id];
+			entry.total++;
+			if (cg.status === 'in_progress' || cg.status === 'completed') {
+				entry.accepted++;
+			} else if (cg.status === 'deferred') {
+				entry.deferred++;
+			} else {
+				entry.pending++;
 			}
 		}
 	}
 
 	// ── Available goals for dependency selection ─────────────────────────────
-	const { data: allOrgGoals } = await db
-		.from('org_goals')
-		.select(
-			'id, title, hierarchy_node_id, org_hierarchy_nodes!org_goals_hierarchy_node_id_fkey(name)'
-		)
-		.eq('organization_id', organization.id)
-		.order('title', { ascending: true });
+	const allOrgGoals = await many<{
+		id: string;
+		title: string;
+		node_name: string | null;
+	}>(sql`
+		select g.id, g.title, n.name as node_name
+		from org_goals g
+		left join org_hierarchy_nodes n on n.id = g.hierarchy_node_id
+		where g.organization_id = ${organization.id}
+		order by g.title asc
+	`);
 
-	const availableGoals = (allOrgGoals ?? []).map((g) => {
-		const nodeData = g.org_hierarchy_nodes as { name: string } | null;
-		return { id: g.id, title: g.title, nodeName: nodeData?.name ?? null };
-	});
+	const availableGoals = allOrgGoals.map((g) => ({
+		id: g.id,
+		title: g.title,
+		nodeName: g.node_name ?? null
+	}));
 
 	// ── Goal adjustment log ──────────────────────────────────────────────────
 	let goalAdjustments: GoalAdjustmentRow[] = [];
 
 	if (goalIds.length > 0) {
-		const { data: adjustments } = await db
-			.from('goal_adjustments')
-			.select('*, users!goal_adjustments_adjusted_by_fkey(name)')
-			.in('goal_id', goalIds)
-			.order('created_at', { ascending: false });
+		const adjustments = await many<{
+			id: string;
+			goal_id: string;
+			adjusted_by: string;
+			field: string;
+			old_value: string | null;
+			new_value: string | null;
+			reason: string | null;
+			created_at: string;
+			adjuster_name: string | null;
+		}>(sql`
+			select a.*, u.name as adjuster_name
+			from goal_adjustments a
+			left join users u on u.id = a.adjusted_by
+			where a.goal_id in ${sql(goalIds)}
+			order by a.created_at desc
+		`);
 
-		goalAdjustments = (adjustments ?? []).map((a) => {
-			const user = a.users as { name: string } | null;
-			return {
-				id: a.id,
-				goalId: a.goal_id,
-				adjustedBy: a.adjusted_by,
-				adjustedByName: user?.name ?? null,
-				field: a.field,
-				oldValue: a.old_value,
-				newValue: a.new_value,
-				reason: a.reason,
-				createdAt: a.created_at
-			};
-		});
+		goalAdjustments = adjustments.map((a) => ({
+			id: a.id,
+			goalId: a.goal_id,
+			adjustedBy: a.adjusted_by,
+			adjustedByName: a.adjuster_name ?? null,
+			field: a.field,
+			oldValue: a.old_value,
+			newValue: a.new_value,
+			reason: a.reason,
+			createdAt: a.created_at
+		}));
 	}
 
 	// ── Performance log entries ──────────────────────────────────────────
-	const { data: logEntries } = await db
-		.from('performance_logs')
-		.select('*')
-		.eq('node_id', userNode.id)
-		.order('period_start', { ascending: false })
-		.limit(100);
+	const logEntries = await many<{
+		id: string;
+		metric_id: string;
+		period_start: string;
+		period_end: string;
+		cadence: string;
+		measured_value: Record<string, unknown> | null;
+		assessed_tier: string;
+		data_source: string | null;
+		notes: string | null;
+		recorded_by: string;
+		created_at: string;
+	}>(sql`
+		select * from performance_logs
+		where node_id = ${userNode.id}
+		order by period_start desc
+		limit 100
+	`);
 
-	const performanceEntries = (logEntries ?? []).map((e) => ({
+	const performanceEntries = logEntries.map((e) => ({
 		id: e.id,
 		metricId: e.metric_id,
 		periodStart: e.period_start,
 		periodEnd: e.period_end,
 		cadence: e.cadence,
 		measuredValue: e.measured_value,
-		assessedTier: e.assessed_tier,
+		assessedTier: e.assessed_tier as TierLevel,
 		dataSource: e.data_source,
 		notes: e.notes,
 		recordedBy: e.recorded_by,
@@ -434,12 +525,12 @@ export const load = async ({ parent }: Parameters<PageServerLoad>[0]) => {
 	}));
 
 	// ── Metrics with performance cadence (for performance tab) ────────────
-	const performanceMetrics = (nodeMetrics ?? []).map((m) => ({
+	const performanceMetrics = nodeMetrics.map((m) => ({
 		id: m.id,
 		name: m.name,
 		measurementType: m.measurement_type,
 		weight: m.weight,
-		currentTier: m.current_tier,
+		currentTier: m.current_tier as TierLevel | null,
 		performanceCadence: m.performance_cadence
 	}));
 
@@ -487,41 +578,36 @@ export const actions = {
 
 		if (!name) return fail(400, { error: 'validation.metric_name_required' });
 
-		const { data: existingMetrics } = await db
-			.from('metrics')
-			.select('sort_order')
-			.eq('node_id', userNode.id);
+		const existingMetrics = await many<{ sort_order: number }>(sql`
+			select sort_order from metrics where node_id = ${userNode.id}
+		`);
 
-		const maxSortOrder = Math.max(0, ...(existingMetrics ?? []).map((m) => m.sort_order));
+		const maxSortOrder = Math.max(0, ...existingMetrics.map((m) => m.sort_order));
+		const measurement = measurementType || 'qualitative';
+		const indicator = indicatorType || 'health';
+		const originVal = origin || 'self_defined';
+		const weightOrNull = weight || null;
+		const descriptionOrNull = description || null;
+		const sortOrder = maxSortOrder + 1;
 
-		const { data: newMetric, error } = await db
-			.from('metrics')
-			.insert({
-				organization_id: organization.id,
-				node_id: userNode.id,
-				assigned_by: locals.user.id,
-				name,
-				description,
-				measurement_type: (measurementType || 'qualitative') as 'qualitative',
-				indicator_type: (indicatorType || 'health') as 'health',
-				origin: (origin || 'self_defined') as 'self_defined',
-				weight: weight || null,
-				sort_order: maxSortOrder + 1
-			})
-			.select()
-			.single();
-
-		if (error || !newMetric) return fail(500, { error: 'error.generic' });
+		const newMetric = await one<{ id: string }>(sql`
+			insert into metrics (
+				organization_id, node_id, assigned_by, name, description,
+				measurement_type, indicator_type, origin, weight, sort_order
+			) values (
+				${organization.id}, ${userNode.id}, ${locals.user.id}, ${name}, ${descriptionOrNull},
+				${measurement}, ${indicator}, ${originVal}, ${weightOrNull}, ${sortOrder}
+			)
+			returning id
+		`);
 
 		for (const tier of TIER_LEVELS) {
 			const thresholdDesc = formData.get(`threshold_${tier}`)?.toString().trim();
 			if (thresholdDesc) {
-				await db.from('metric_thresholds').insert({
-					metric_id: newMetric.id,
-					tier,
-					description: thresholdDesc,
-					set_by: locals.user.id
-				});
+				await sql`
+					insert into metric_thresholds (metric_id, tier, description, set_by)
+					values (${newMetric.id}, ${tier}, ${thresholdDesc}, ${locals.user.id})
+				`;
 			}
 		}
 
@@ -548,43 +634,42 @@ export const actions = {
 		if (!metricId || !name) return fail(400, { error: 'validation.field_required' });
 		if (await isMetricLocked(metricId)) return fail(403, { error: 'metric.locked' });
 
-		await db
-			.from('metrics')
-			.update({
-				name,
-				description,
-				weight: weight || null,
-				current_tier: currentTier || null,
-				approved_at: null,
-				approved_by: null,
-				updated_at: new Date().toISOString()
-			})
-			.eq('id', metricId);
+		const weightOrNull = weight || null;
+		const tierOrNull = currentTier || null;
+		const descriptionOrNull = description || null;
+
+		await sql`
+			update metrics
+			set name = ${name},
+			    description = ${descriptionOrNull},
+			    weight = ${weightOrNull},
+			    current_tier = ${tierOrNull},
+			    approved_at = null,
+			    approved_by = null,
+			    updated_at = now()
+			where id = ${metricId}
+		`;
 
 		for (const tier of TIER_LEVELS) {
 			const thresholdDesc = formData.get(`threshold_${tier}`)?.toString().trim();
 
-			const { data: existing } = await db
-				.from('metric_thresholds')
-				.select('id')
-				.eq('metric_id', metricId)
-				.eq('tier', tier)
-				.limit(1);
-
-			const existingThreshold = existing?.[0];
+			const existingThreshold = await maybeOne<{ id: string }>(sql`
+				select id from metric_thresholds
+				where metric_id = ${metricId} and tier = ${tier}
+				limit 1
+			`);
 
 			if (existingThreshold) {
-				await db
-					.from('metric_thresholds')
-					.update({ description: thresholdDesc || '', updated_at: new Date().toISOString() })
-					.eq('id', existingThreshold.id);
+				await sql`
+					update metric_thresholds
+					set description = ${thresholdDesc || ''}, updated_at = now()
+					where id = ${existingThreshold.id}
+				`;
 			} else if (thresholdDesc) {
-				await db.from('metric_thresholds').insert({
-					metric_id: metricId,
-					tier,
-					description: thresholdDesc,
-					set_by: locals.user.id
-				});
+				await sql`
+					insert into metric_thresholds (metric_id, tier, description, set_by)
+					values (${metricId}, ${tier}, ${thresholdDesc}, ${locals.user.id})
+				`;
 			}
 		}
 
@@ -605,7 +690,7 @@ export const actions = {
 		if (!metricId) return fail(400, { error: 'validation.field_required' });
 		if (await isMetricLocked(metricId)) return fail(403, { error: 'metric.locked' });
 
-		await db.from('metrics').delete().eq('id', metricId);
+		await sql`delete from metrics where id = ${metricId}`;
 		return { success: true };
 	},
 
@@ -628,10 +713,9 @@ export const actions = {
 		if (total !== 100) return fail(400, { error: 'validation.weights_must_total' });
 
 		for (const [metricId, weight] of Object.entries(weights)) {
-			await db
-				.from('metrics')
-				.update({ weight, updated_at: new Date().toISOString() })
-				.eq('id', metricId);
+			await sql`
+				update metrics set weight = ${weight}, updated_at = now() where id = ${metricId}
+			`;
 		}
 
 		return { success: true };
@@ -653,16 +737,15 @@ export const actions = {
 		if (!metricId) return fail(400, { error: 'validation.field_required' });
 		if (await isMetricLocked(metricId)) return fail(403, { error: 'metric.locked' });
 
-		await db
-			.from('metrics')
-			.update({
-				submitted_at: new Date().toISOString(),
-				submitted_by: locals.user.id,
-				approved_at: null,
-				approved_by: null,
-				updated_at: new Date().toISOString()
-			})
-			.eq('id', metricId);
+		await sql`
+			update metrics
+			set submitted_at = now(),
+			    submitted_by = ${locals.user.id},
+			    approved_at = null,
+			    approved_by = null,
+			    updated_at = now()
+			where id = ${metricId}
+		`;
 
 		return { success: true };
 	},
@@ -681,10 +764,11 @@ export const actions = {
 		const tier = formData.get('tier')?.toString() as TierLevel;
 		if (!metricId || !tier) return fail(400, { error: 'validation.field_required' });
 
-		await db
-			.from('metrics')
-			.update({ current_tier: tier, updated_at: new Date().toISOString() })
-			.eq('id', metricId);
+		await sql`
+			update metrics
+			set current_tier = ${tier}, updated_at = now()
+			where id = ${metricId}
+		`;
 
 		return { success: true };
 	},
@@ -716,21 +800,27 @@ export const actions = {
 		if (!VALID_PRIORITIES.includes(priority))
 			return fail(400, { error: 'validation.field_required' });
 
-		const { error: insertErr } = await db.from('org_goals').insert({
-			organization_id: organization.id,
-			hierarchy_node_id: userNode.id,
-			title,
-			description,
-			goal_type: goalType,
-			priority,
-			status: VALID_STATUSES.includes(status) ? status : 'defined',
-			target_tier: targetTier && VALID_TIERS.includes(targetTier) ? targetTier : null,
-			due_date: dueDate || null,
-			created_by: locals.user.id,
-			assigned_by: locals.user.id
-		});
+		const validatedStatus = VALID_STATUSES.includes(status) ? status : 'defined';
+		const validatedTargetTier =
+			targetTier && VALID_TIERS.includes(targetTier) ? targetTier : null;
+		const dueDateOrNull = dueDate || null;
 
-		if (insertErr) return fail(500, { error: 'error.generic' });
+		try {
+			await sql`
+				insert into org_goals (
+					organization_id, hierarchy_node_id, title, description,
+					goal_type, priority, status, target_tier, due_date,
+					created_by, assigned_by
+				) values (
+					${organization.id}, ${userNode.id}, ${title}, ${description},
+					${goalType}, ${priority}, ${validatedStatus}, ${validatedTargetTier}, ${dueDateOrNull},
+					${locals.user.id}, ${locals.user.id}
+				)
+			`;
+		} catch {
+			return fail(500, { error: 'error.generic' });
+		}
+
 		return { createSuccess: true };
 	},
 
@@ -761,14 +851,21 @@ export const actions = {
 
 		if (!goalId || !title) return fail(400, { error: 'validation.field_required' });
 
-		const { data: current } = await db
-			.from('org_goals')
-			.select(
-				'id, title, description, goal_type, priority, status, target_tier, actual_tier, due_date'
-			)
-			.eq('id', goalId)
-			.eq('hierarchy_node_id', userNode.id)
-			.single();
+		const current = await maybeOne<{
+			id: string;
+			title: string;
+			description: string | null;
+			goal_type: string;
+			priority: string;
+			status: string;
+			target_tier: string | null;
+			actual_tier: string | null;
+			due_date: string | null;
+		}>(sql`
+			select id, title, description, goal_type, priority, status, target_tier, actual_tier, due_date
+			from org_goals
+			where id = ${goalId} and hierarchy_node_id = ${userNode.id}
+		`);
 
 		if (!current) return fail(404, { error: 'error.generic' });
 
@@ -778,20 +875,20 @@ export const actions = {
 		const validatedTargetTier = targetTier && VALID_TIERS.includes(targetTier) ? targetTier : null;
 		const validatedActualTier = actualTier && VALID_TIERS.includes(actualTier) ? actualTier : null;
 
-		await db
-			.from('org_goals')
-			.update({
-				title,
-				description,
-				goal_type: validatedType,
-				priority: validatedPriority,
-				status: validatedStatus,
-				target_tier: validatedTargetTier,
-				actual_tier: validatedActualTier,
-				due_date: dueDate || null,
-				updated_at: new Date().toISOString()
-			})
-			.eq('id', goalId);
+		const dueDateOrNull = dueDate || null;
+		await sql`
+			update org_goals
+			set title = ${title},
+			    description = ${description},
+			    goal_type = ${validatedType},
+			    priority = ${validatedPriority},
+			    status = ${validatedStatus},
+			    target_tier = ${validatedTargetTier},
+			    actual_tier = ${validatedActualTier},
+			    due_date = ${dueDateOrNull},
+			    updated_at = now()
+			where id = ${goalId}
+		`;
 
 		const fieldComparisons: { field: string; oldVal: string | null; newVal: string | null }[] = [
 			{ field: 'title', oldVal: current.title, newVal: title },
@@ -806,14 +903,10 @@ export const actions = {
 
 		for (const { field, oldVal, newVal } of fieldComparisons) {
 			if (oldVal !== newVal) {
-				await db.from('goal_adjustments').insert({
-					goal_id: goalId,
-					adjusted_by: locals.user.id,
-					field,
-					old_value: oldVal,
-					new_value: newVal,
-					reason
-				});
+				await sql`
+					insert into goal_adjustments (goal_id, adjusted_by, field, old_value, new_value, reason)
+					values (${goalId}, ${locals.user.id}, ${field}, ${oldVal}, ${newVal}, ${reason})
+				`;
 			}
 		}
 
@@ -834,16 +927,14 @@ export const actions = {
 		const goalId = formData.get('goalId')?.toString();
 		if (!goalId) return fail(400, { error: 'validation.field_required' });
 
-		const { data: goal } = await db
-			.from('org_goals')
-			.select('id')
-			.eq('id', goalId)
-			.eq('hierarchy_node_id', userNode.id)
-			.single();
+		const goal = await maybeOne<{ id: string }>(sql`
+			select id from org_goals
+			where id = ${goalId} and hierarchy_node_id = ${userNode.id}
+		`);
 
 		if (!goal) return fail(404, { error: 'error.generic' });
 
-		await db.from('org_goals').delete().eq('id', goalId);
+		await sql`delete from org_goals where id = ${goalId}`;
 		return { deleteSuccess: true };
 	},
 
@@ -863,15 +954,15 @@ export const actions = {
 			return fail(400, { error: 'validation.field_required' });
 		if (goalId === dependsOnGoalId) return fail(400, { error: 'validation.field_required' });
 
-		const { error: insertErr } = await db.from('goal_dependencies').insert({
-			goal_id: goalId,
-			depends_on_goal_id: dependsOnGoalId,
-			dependency_type: dependencyType as GoalDependencyType,
-			description,
-			created_by: locals.user.id
-		});
+		try {
+			await sql`
+				insert into goal_dependencies (goal_id, depends_on_goal_id, dependency_type, description, created_by)
+				values (${goalId}, ${dependsOnGoalId}, ${dependencyType as GoalDependencyType}, ${description}, ${locals.user.id})
+			`;
+		} catch {
+			return fail(500, { error: 'error.generic' });
+		}
 
-		if (insertErr) return fail(500, { error: 'error.generic' });
 		return { dependencySuccess: true };
 	},
 
@@ -893,12 +984,18 @@ export const actions = {
 		const goalId = formData.get('goalId')?.toString();
 		if (!goalId) return fail(400, { error: 'validation.field_required' });
 
-		const { data: goal } = await db
-			.from('org_goals')
-			.select('*')
-			.eq('id', goalId)
-			.eq('hierarchy_node_id', userNode.id)
-			.single();
+		const goal = await maybeOne<{
+			title: string;
+			description: string | null;
+			goal_type: string;
+			priority: string;
+			target_tier: string | null;
+			due_date: string | null;
+		}>(sql`
+			select title, description, goal_type, priority, target_tier, due_date
+			from org_goals
+			where id = ${goalId} and hierarchy_node_id = ${userNode.id}
+		`);
 
 		if (!goal) return fail(404, { error: 'error.generic' });
 
@@ -907,30 +1004,24 @@ export const actions = {
 
 		let cascaded = 0;
 		for (const childNodeId of childNodeIds) {
-			const { data: existing } = await db
-				.from('org_goals')
-				.select('id')
-				.eq('source_goal_id', goalId)
-				.eq('hierarchy_node_id', childNodeId)
-				.single();
+			const existing = await maybeOne<{ id: string }>(sql`
+				select id from org_goals
+				where source_goal_id = ${goalId} and hierarchy_node_id = ${childNodeId}
+			`);
 
 			if (existing) continue;
 
-			await db.from('org_goals').insert({
-				organization_id: organization.id,
-				hierarchy_node_id: childNodeId,
-				title: goal.title,
-				description: goal.description,
-				goal_type: goal.goal_type,
-				priority: goal.priority,
-				status: 'defined',
-				target_tier: goal.target_tier,
-				due_date: goal.due_date,
-				goal_origin: 'cascaded',
-				source_goal_id: goalId,
-				created_by: locals.user.id,
-				assigned_by: locals.user.id
-			});
+			await sql`
+				insert into org_goals (
+					organization_id, hierarchy_node_id, title, description,
+					goal_type, priority, status, target_tier, due_date,
+					goal_origin, source_goal_id, created_by, assigned_by
+				) values (
+					${organization.id}, ${childNodeId}, ${goal.title}, ${goal.description},
+					${goal.goal_type}, ${goal.priority}, 'defined', ${goal.target_tier}, ${goal.due_date},
+					'cascaded', ${goalId}, ${locals.user.id}, ${locals.user.id}
+				)
+			`;
 			cascaded++;
 		}
 
@@ -947,7 +1038,7 @@ export const actions = {
 		const dependencyId = formData.get('dependencyId')?.toString();
 		if (!dependencyId) return fail(400, { error: 'validation.field_required' });
 
-		await db.from('goal_dependencies').delete().eq('id', dependencyId);
+		await sql`delete from goal_dependencies where id = ${dependencyId}`;
 		return { removeDependencySuccess: true };
 	},
 
@@ -961,12 +1052,11 @@ export const actions = {
 	record: async ({ request, locals, cookies }: import('./$types').RequestEvent) => {
 		if (!locals.user) return fail(401);
 
-		const { data: mem } = await db
-			.from('org_members')
-			.select('role')
-			.eq('user_id', locals.user.id)
-			.is('removed_at', null)
-			.single();
+		const mem = await maybeOne<{ role: string }>(sql`
+			select role from org_members
+			where user_id = ${locals.user.id} and removed_at is null
+			limit 1
+		`);
 		if (mem?.role === 'viewer') return fail(403, { error: 'error.generic' });
 
 		const userNode = await resolveActionNode(locals.user.id);
@@ -1005,33 +1095,28 @@ export const actions = {
 			return fail(400, { error: 'invalid_dates' });
 		}
 
-		const { data: metric } = await db
-			.from('metrics')
-			.select('id')
-			.eq('id', metricId)
-			.eq('node_id', userNode.id)
-			.single();
+		const metric = await maybeOne<{ id: string }>(sql`
+			select id from metrics
+			where id = ${metricId} and node_id = ${userNode.id}
+		`);
 
 		if (!metric) {
 			return fail(400, { error: 'metric_not_found' });
 		}
 
-		const { error } = await db.from('performance_logs').insert({
-			organization_id: userNode.organization_id,
-			node_id: userNode.id,
-			metric_id: metricId,
-			period_start: periodStart,
-			period_end: periodEnd,
-			cadence: cadence as (typeof VALID_CADENCES)[number],
-			measured_value: measuredValue,
-			assessed_tier: assessedTier as TierLevel,
-			data_source: dataSource,
-			notes,
-			recorded_by: locals.user.id
-		});
-
-		if (error) {
-			if (error.code === '23505') {
+		try {
+			await sql`
+				insert into performance_logs (
+					organization_id, node_id, metric_id, period_start, period_end,
+					cadence, measured_value, assessed_tier, data_source, notes, recorded_by
+				) values (
+					${userNode.organization_id}, ${userNode.id}, ${metricId}, ${periodStart}, ${periodEnd},
+					${cadence}, ${sql.json(measuredValue as never)}, ${assessedTier},
+					${dataSource}, ${notes}, ${locals.user.id}
+				)
+			`;
+		} catch (err) {
+			if ((err as { code?: string }).code === '23505') {
 				return fail(409, { error: 'duplicate_entry' });
 			}
 			return fail(500, { error: 'save_failed' });
@@ -1046,12 +1131,11 @@ export const actions = {
 	setCadence: async ({ request, locals, cookies }: import('./$types').RequestEvent) => {
 		if (!locals.user) return fail(401);
 
-		const { data: mem } = await db
-			.from('org_members')
-			.select('role')
-			.eq('user_id', locals.user.id)
-			.is('removed_at', null)
-			.single();
+		const mem = await maybeOne<{ role: string }>(sql`
+			select role from org_members
+			where user_id = ${locals.user.id} and removed_at is null
+			limit 1
+		`);
 		if (mem?.role === 'viewer') return fail(403, { error: 'error.generic' });
 
 		const userNode = await resolveActionNode(locals.user.id);
@@ -1069,24 +1153,20 @@ export const actions = {
 			return fail(400, { error: 'invalid_cadence' });
 		}
 
-		const { data: metric } = await db
-			.from('metrics')
-			.select('id')
-			.eq('id', metricId)
-			.eq('node_id', userNode.id)
-			.single();
+		const metric = await maybeOne<{ id: string }>(sql`
+			select id from metrics
+			where id = ${metricId} and node_id = ${userNode.id}
+		`);
 
 		if (!metric) {
 			return fail(400, { error: 'metric_not_found' });
 		}
 
-		await db
-			.from('metrics')
-			.update({
-				performance_cadence: cadence as (typeof VALID_CADENCES)[number],
-				updated_at: new Date().toISOString()
-			})
-			.eq('id', metricId);
+		await sql`
+			update metrics
+			set performance_cadence = ${cadence}, updated_at = now()
+			where id = ${metricId}
+		`;
 
 		return { cadenceSuccess: true };
 	}

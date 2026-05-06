@@ -17,7 +17,7 @@
  * ```
  */
 
-import { db } from '$lib/server/db.js';
+import { sql, maybeOne, one } from '$lib/server/db.js';
 
 /**
  * License price in USD — the perpetual license price.
@@ -25,16 +25,24 @@ import { db } from '$lib/server/db.js';
  */
 export const LICENSE_PRICE_USD = 5000;
 
+interface LicenseRow {
+	id: string;
+	user_id: string;
+	purchased_at: string;
+	status: string;
+	created_at: string;
+}
+
 /**
  * Get a user's license record if one exists.
  *
  * @param userId - The authenticated user's ID
  * @returns The license record, or null if the user has no license
  */
-export async function getUserLicense(userId: string) {
-	const { data: license } = await db.from('licenses').select('*').eq('user_id', userId).single();
-
-	return license || null;
+export async function getUserLicense(userId: string): Promise<LicenseRow | null> {
+	return await maybeOne<LicenseRow>(sql`
+		select * from licenses where user_id = ${userId} limit 1
+	`);
 }
 
 /**
@@ -66,25 +74,17 @@ export async function grantLicense(userId: string, customerEmail: string): Promi
 		return existing.id;
 	}
 
-	const { data: license, error } = await db
-		.from('licenses')
-		.insert({
-			user_id: userId,
-			status: 'active'
-		})
-		.select()
-		.single();
-
-	if (error || !license) {
-		throw new Error(`Failed to create license: ${error?.message}`);
-	}
+	const license = await one<{ id: string }>(sql`
+		insert into licenses (user_id, status)
+		values (${userId}, 'active')
+		returning id
+	`);
 
 	// Track the grant event
-	await db.from('purchase_events').insert({
-		account_id: userId,
-		event_type: 'license_granted',
-		customer_email: customerEmail
-	});
+	await sql`
+		insert into purchase_events (account_id, event_type, customer_email)
+		values (${userId}, 'license_granted', ${customerEmail})
+	`;
 
 	return license.id;
 }

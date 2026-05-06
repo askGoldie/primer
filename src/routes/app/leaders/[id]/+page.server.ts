@@ -27,7 +27,7 @@
 
 import { error, fail } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types.js';
-import { db } from '$lib/server/db.js';
+import { sql, maybeOne, many, one } from '$lib/server/db.js';
 import {
 	calculateCompositeScore,
 	getTierFromScore,
@@ -59,18 +59,35 @@ export const load: PageServerLoad = async ({ params, parent }) => {
 	const { organization, userNode, isSystemAdmin: parentIsSystemAdmin } = await parent();
 
 	// Load the requested node (must belong to same org)
-	const { data: targetNode } = await db
-		.from('org_hierarchy_nodes')
-		.select('*, users!org_hierarchy_nodes_user_id_fkey(name, email)')
-		.eq('id', params.id)
-		.eq('organization_id', organization.id)
-		.single();
+	const targetNode = await maybeOne<{
+		id: string;
+		name: string;
+		title: string | null;
+		node_type: string;
+		parent_id: string | null;
+		organization_id: string;
+		user_id: string | null;
+		peer_visibility: string;
+		user_name: string | null;
+		user_email: string | null;
+	}>(sql`
+		select
+			n.*,
+			u.name  as user_name,
+			u.email as user_email
+		from org_hierarchy_nodes n
+		left join users u on u.id = n.user_id
+		where n.id = ${params.id}
+		  and n.organization_id = ${organization.id}
+	`);
 
 	if (!targetNode) {
 		error(404, { message: 'Person not found in this organization.' });
 	}
 
-	const userData = targetNode.users as { name: string; email: string } | null;
+	const userData = targetNode.user_name
+		? { name: targetNode.user_name, email: targetNode.user_email ?? '' }
+		: null;
 
 	// ── Visibility check ─────────────────────────────────────────────────────
 	let canView = false; // full ancestor-like access
@@ -89,11 +106,9 @@ export const load: PageServerLoad = async ({ params, parent }) => {
 			canView = true;
 		} else {
 			// Path 3: check if they are peers (share the same parent)
-			const { data: userNodeRecord } = await db
-				.from('org_hierarchy_nodes')
-				.select('parent_id')
-				.eq('id', userNode.id)
-				.single();
+			const userNodeRecord = await maybeOne<{ parent_id: string | null }>(sql`
+				select parent_id from org_hierarchy_nodes where id = ${userNode.id}
+			`);
 
 			if (
 				targetNode.parent_id &&
@@ -105,25 +120,27 @@ export const load: PageServerLoad = async ({ params, parent }) => {
 
 			// Path 4: check for visibility grants
 			if (!canView && !isPeer) {
-				const { data: grants } = await db
-					.from('visibility_grants')
-					.select('*')
-					.eq('grantee_node_id', userNode.id)
-					.eq('organization_id', organization.id)
-					.is('revoked_at', null);
+				const grants = await many<{
+					scope_node_id: string | null;
+					visibility: string;
+				}>(sql`
+					select scope_node_id, visibility
+					from visibility_grants
+					where grantee_node_id = ${userNode.id}
+					  and organization_id = ${organization.id}
+					  and revoked_at is null
+				`);
 
-				if (grants?.length) {
-					for (const grant of grants) {
-						if (!grant.scope_node_id) {
-							// Org-wide grant — covers everything
-							grantVisibility = grant.visibility as PeerVisibility;
-							break;
-						}
-						// Scoped grant — check if target is in the subtree
-						if (await isInSubtree(targetNode.id, grant.scope_node_id)) {
-							grantVisibility = grant.visibility as PeerVisibility;
-							break;
-						}
+				for (const grant of grants) {
+					if (!grant.scope_node_id) {
+						// Org-wide grant — covers everything
+						grantVisibility = grant.visibility as PeerVisibility;
+						break;
+					}
+					// Scoped grant — check if target is in the subtree
+					if (await isInSubtree(targetNode.id, grant.scope_node_id)) {
+						grantVisibility = grant.visibility as PeerVisibility;
+						break;
 					}
 				}
 			}
@@ -136,11 +153,9 @@ export const load: PageServerLoad = async ({ params, parent }) => {
 	let peerVisibility: PeerVisibility = 'score_only';
 
 	if (isPeer && targetNode.parent_id) {
-		const { data: parentNode } = await db
-			.from('org_hierarchy_nodes')
-			.select('peer_visibility')
-			.eq('id', targetNode.parent_id)
-			.single();
+		const parentNode = await maybeOne<{ peer_visibility: string | null }>(sql`
+			select peer_visibility from org_hierarchy_nodes where id = ${targetNode.parent_id}
+		`);
 
 		peerVisibility = (parentNode?.peer_visibility as PeerVisibility) ?? 'score_only';
 	}
@@ -200,29 +215,46 @@ export const load: PageServerLoad = async ({ params, parent }) => {
 	}[] = [];
 
 	if (canSeeMetrics) {
-		const { data: nodeMetrics } = await db
-			.from('metrics')
-			.select('*')
-			.eq('node_id', targetNode.id)
-			.order('sort_order', { ascending: true });
+		const nodeMetrics = await many<{
+			id: string;
+			name: string;
+			description: string | null;
+			weight: number | null;
+			current_tier: string | null;
+			indicator_type: string;
+			measurement_type: string;
+			origin: string;
+			submitted_at: string | null;
+			approved_at: string | null;
+			locked_by_snapshot_id: string | null;
+		}>(sql`
+			select * from metrics
+			where node_id = ${targetNode.id}
+			order by sort_order asc
+		`);
 
 		// Fetch thresholds for all metrics in a single query, then group by metric_id.
 		const thresholdsByMetric = new Map<string, { tier: string; description: string | null }[]>();
-		if (canSeeThresholds && (nodeMetrics ?? []).length > 0) {
-			const metricIds = (nodeMetrics ?? []).map((m) => m.id);
-			const { data: allThresholds } = await db
-				.from('metric_thresholds')
-				.select('metric_id, tier, description')
-				.in('metric_id', metricIds);
+		if (canSeeThresholds && nodeMetrics.length > 0) {
+			const metricIds = nodeMetrics.map((m) => m.id);
+			const allThresholds = await many<{
+				metric_id: string;
+				tier: string;
+				description: string | null;
+			}>(sql`
+				select metric_id, tier, description
+				from metric_thresholds
+				where metric_id in ${sql(metricIds)}
+			`);
 
-			for (const t of allThresholds ?? []) {
+			for (const t of allThresholds) {
 				const list = thresholdsByMetric.get(t.metric_id) ?? [];
 				list.push({ tier: t.tier, description: t.description });
 				thresholdsByMetric.set(t.metric_id, list);
 			}
 		}
 
-		metrics = (nodeMetrics ?? []).map((metric) => {
+		metrics = nodeMetrics.map((metric) => {
 			const thresholds = canSeeThresholds
 				? TIER_LEVELS.map((tier) => {
 						const t = (thresholdsByMetric.get(metric.id) ?? []).find((th) => th.tier === tier);
@@ -235,7 +267,7 @@ export const load: PageServerLoad = async ({ params, parent }) => {
 				name: metric.name,
 				description: effectiveCanView ? metric.description : null,
 				weight: metric.weight,
-				currentTier: canSeeScores ? metric.current_tier : null,
+				currentTier: canSeeScores ? (metric.current_tier as TierLevel | null) : null,
 				indicatorType: metric.indicator_type,
 				measurementType: metric.measurement_type,
 				origin: metric.origin,
@@ -261,13 +293,23 @@ export const load: PageServerLoad = async ({ params, parent }) => {
 	}[] = [];
 
 	if (canSeeGoals) {
-		const { data: nodeGoals } = await db
-			.from('org_goals')
-			.select('*')
-			.eq('hierarchy_node_id', targetNode.id)
-			.order('created_at', { ascending: true });
+		const nodeGoals = await many<{
+			id: string;
+			title: string;
+			description: string | null;
+			priority: string;
+			status: string;
+			goal_type: string;
+			target_tier: string | null;
+			actual_tier: string | null;
+			due_date: string | null;
+		}>(sql`
+			select * from org_goals
+			where hierarchy_node_id = ${targetNode.id}
+			order by created_at asc
+		`);
 
-		goals = (nodeGoals ?? []).map((g) => ({
+		goals = nodeGoals.map((g) => ({
 			id: g.id,
 			title: g.title,
 			description: g.description,
@@ -283,34 +325,42 @@ export const load: PageServerLoad = async ({ params, parent }) => {
 	// ── Snapshot history ─────────────────────────────────────────────────────
 	// Fetch all snapshots newest-first. For managers, include the adjuster's
 	// name so the UI can show who adjusted a snapshot and when.
-	const { data: snapshotRows } = await db
-		.from('score_snapshots')
-		.select(
-			'id, composite_score, composite_tier, cycle_label, created_at, notes, adjusted_at, recorded_by, adjusted_by, users!score_snapshots_adjusted_by_fkey(name)'
-		)
-		.eq('node_id', targetNode.id)
-		.order('created_at', { ascending: false });
+	const snapshotRows = await many<{
+		id: string;
+		composite_score: number;
+		composite_tier: string;
+		cycle_label: string;
+		created_at: string;
+		notes: string | null;
+		adjusted_at: string | null;
+		recorded_by: string;
+		adjusted_by: string | null;
+		adjuster_name: string | null;
+	}>(sql`
+		select
+			s.id, s.composite_score, s.composite_tier, s.cycle_label,
+			s.created_at, s.notes, s.adjusted_at, s.recorded_by, s.adjusted_by,
+			u.name as adjuster_name
+		from score_snapshots s
+		left join users u on u.id = s.adjusted_by
+		where s.node_id = ${targetNode.id}
+		order by s.created_at desc
+	`);
 
-	const latestSnapshot = snapshotRows?.[0] ?? null;
+	const latestSnapshot = snapshotRows[0] ?? null;
 
 	// Only expose full snapshot history (with IDs for adjustment) to managers.
 	const snapshotHistory = canManageNode
-		? (snapshotRows ?? []).map((s) => {
-				// supabase-js infers the FK join as an array even though it resolves
-				// to at most one row; normalise to a single object or null.
-				const adjusterRaw = s.users as unknown as { name: string } | { name: string }[] | null;
-				const adjusterData = Array.isArray(adjusterRaw) ? (adjusterRaw[0] ?? null) : adjusterRaw;
-				return {
-					id: s.id,
-					compositeScore: s.composite_score,
-					compositeTier: s.composite_tier as TierLevel,
-					cycleLabel: s.cycle_label,
-					createdAt: s.created_at,
-					notes: s.notes ?? null,
-					adjustedAt: s.adjusted_at ?? null,
-					adjustedByName: adjusterData?.name ?? null
-				};
-			})
+		? snapshotRows.map((s) => ({
+				id: s.id,
+				compositeScore: s.composite_score,
+				compositeTier: s.composite_tier as TierLevel,
+				cycleLabel: s.cycle_label,
+				createdAt: s.created_at,
+				notes: s.notes ?? null,
+				adjustedAt: s.adjusted_at ?? null,
+				adjustedByName: s.adjuster_name ?? null
+			}))
 		: [];
 
 	// ── Inquiry eligibility ───────────────────────────────────────────────────
@@ -372,25 +422,21 @@ export const actions: Actions = {
 			return fail(403, { error: 'error.generic' });
 		}
 
-		const { data: metric } = await db
-			.from('metrics')
-			.select('id, node_id')
-			.eq('id', metricId)
-			.eq('node_id', params.id)
-			.single();
+		const metric = await maybeOne<{ id: string }>(sql`
+			select id from metrics where id = ${metricId} and node_id = ${params.id}
+		`);
 
 		if (!metric) {
 			return fail(404, { error: 'error.generic' });
 		}
 
-		await db
-			.from('metrics')
-			.update({
-				approved_at: new Date().toISOString(),
-				approved_by: locals.user.id,
-				updated_at: new Date().toISOString()
-			})
-			.eq('id', metricId);
+		await sql`
+			update metrics
+			set approved_at = now(),
+			    approved_by = ${locals.user.id},
+			    updated_at = now()
+			where id = ${metricId}
+		`;
 
 		return { approveSuccess: true };
 	},
@@ -416,47 +462,40 @@ export const actions: Actions = {
 		if (!name) return fail(400, { error: 'validation.metric_name_required' });
 
 		// Get max sort order for this node
-		const { data: existing } = await db
-			.from('metrics')
-			.select('sort_order')
-			.eq('node_id', params.id);
-		const maxSort = Math.max(0, ...(existing ?? []).map((m) => m.sort_order));
+		const existing = await many<{ sort_order: number }>(sql`
+			select sort_order from metrics where node_id = ${params.id}
+		`);
+		const maxSort = Math.max(0, ...existing.map((m) => m.sort_order));
 
 		// Co-authorship flag: marks metrics developed collaboratively with the employee.
 		// co_authored = metric was defined together (employee had meaningful input);
 		// superior_assigned = metric was handed down unilaterally.
 		const isCoAuthored = formData.get('isCoAuthored') === 'true';
+		const origin = isCoAuthored ? 'co_authored' : 'superior_assigned';
+		const sortOrder = maxSort + 1;
+		const weightOrNull = weight || null;
+		const descriptionOrNull = description || null;
 
 		// Create the metric assigned to the subordinate
-		const { data: newMetric, error: insertErr } = await db
-			.from('metrics')
-			.insert({
-				organization_id: mgr.organizationId,
-				node_id: params.id,
-				assigned_by: locals.user.id,
-				name,
-				description,
-				measurement_type: 'qualitative',
-				indicator_type: 'health',
-				origin: isCoAuthored ? 'co_authored' : 'superior_assigned',
-				weight: weight || null,
-				sort_order: maxSort + 1
-			})
-			.select()
-			.single();
-
-		if (insertErr || !newMetric) return fail(500, { error: 'error.generic' });
+		const newMetric = await one<{ id: string }>(sql`
+			insert into metrics (
+				organization_id, node_id, assigned_by, name, description,
+				measurement_type, indicator_type, origin, weight, sort_order
+			) values (
+				${mgr.organizationId}, ${params.id}, ${locals.user.id}, ${name}, ${descriptionOrNull},
+				'qualitative', 'health', ${origin}, ${weightOrNull}, ${sortOrder}
+			)
+			returning id
+		`);
 
 		// Create threshold stubs from the leader's input
 		for (const tier of TIER_LEVELS) {
 			const desc = formData.get(`threshold_${tier}`)?.toString().trim();
 			if (desc) {
-				await db.from('metric_thresholds').insert({
-					metric_id: newMetric.id,
-					tier,
-					description: desc,
-					set_by: locals.user.id
-				});
+				await sql`
+					insert into metric_thresholds (metric_id, tier, description, set_by)
+					values (${newMetric.id}, ${tier}, ${desc}, ${locals.user.id})
+				`;
 			}
 		}
 
@@ -486,48 +525,46 @@ export const actions: Actions = {
 		if (!metricId || !name) return fail(400, { error: 'validation.field_required' });
 
 		// Verify the metric belongs to the target node
-		const { data: metric } = await db
-			.from('metrics')
-			.select('id, node_id')
-			.eq('id', metricId)
-			.eq('node_id', params.id)
-			.single();
+		const metric = await maybeOne<{ id: string }>(sql`
+			select id from metrics where id = ${metricId} and node_id = ${params.id}
+		`);
 
 		if (!metric) return fail(404, { error: 'error.generic' });
 
-		await db
-			.from('metrics')
-			.update({
-				name,
-				description,
-				weight: weight || null,
-				current_tier: currentTier || null,
-				updated_at: new Date().toISOString()
-			})
-			.eq('id', metricId);
+		const weightOrNull = weight || null;
+		const tierOrNull = currentTier || null;
+		const descriptionOrNull = description || null;
+
+		await sql`
+			update metrics
+			set name = ${name},
+			    description = ${descriptionOrNull},
+			    weight = ${weightOrNull},
+			    current_tier = ${tierOrNull},
+			    updated_at = now()
+			where id = ${metricId}
+		`;
 
 		// Update thresholds
 		for (const tier of TIER_LEVELS) {
 			const desc = formData.get(`threshold_${tier}`)?.toString().trim();
-			const { data: existing } = await db
-				.from('metric_thresholds')
-				.select('id')
-				.eq('metric_id', metricId)
-				.eq('tier', tier)
-				.limit(1);
+			const existing = await maybeOne<{ id: string }>(sql`
+				select id from metric_thresholds
+				where metric_id = ${metricId} and tier = ${tier}
+				limit 1
+			`);
 
-			if (existing?.[0]) {
-				await db
-					.from('metric_thresholds')
-					.update({ description: desc || '', updated_at: new Date().toISOString() })
-					.eq('id', existing[0].id);
+			if (existing) {
+				await sql`
+					update metric_thresholds
+					set description = ${desc || ''}, updated_at = now()
+					where id = ${existing.id}
+				`;
 			} else if (desc) {
-				await db.from('metric_thresholds').insert({
-					metric_id: metricId,
-					tier,
-					description: desc,
-					set_by: locals.user.id
-				});
+				await sql`
+					insert into metric_thresholds (metric_id, tier, description, set_by)
+					values (${metricId}, ${tier}, ${desc}, ${locals.user.id})
+				`;
 			}
 		}
 
@@ -554,12 +591,21 @@ export const actions: Actions = {
 		if (!cycleLabel) return fail(400, { error: 'validation.field_required' });
 
 		// Load all metrics for the target node
-		const { data: nodeMetrics } = await db
-			.from('metrics')
-			.select('id, name, measurement_type, origin, current_value, current_tier, weight')
-			.eq('node_id', params.id);
+		const nodeMetrics = await many<{
+			id: string;
+			name: string;
+			measurement_type: string;
+			origin: string;
+			current_value: string | number | null;
+			current_tier: string | null;
+			weight: number | null;
+		}>(sql`
+			select id, name, measurement_type, origin, current_value, current_tier, weight
+			from metrics
+			where node_id = ${params.id}
+		`);
 
-		const scoreable = (nodeMetrics ?? []).filter((m) => m.current_tier && m.weight);
+		const scoreable = nodeMetrics.filter((m) => m.current_tier && m.weight);
 
 		if (scoreable.length === 0) {
 			return fail(400, { error: 'snapshot.no_scoreable_metrics' });
@@ -581,38 +627,32 @@ export const actions: Actions = {
 				name: m.name,
 				measurementType: m.measurement_type,
 				origin: m.origin,
-				currentValue: m.current_value,
+				currentValue: m.current_value as string | number | null,
 				currentTier: m.current_tier as TierLevel,
 				weight: m.weight as number
 			}))
 		);
 
 		// Create the snapshot
-		const { data: snapshot, error: snapErr } = await db
-			.from('score_snapshots')
-			.insert({
-				organization_id: mgr.organizationId,
-				node_id: params.id,
-				composite_score: compositeScore,
-				composite_tier: compositeTier,
-				metric_details: metricDetails as unknown as Record<string, unknown>,
-				cycle_label: cycleLabel,
-				notes,
-				recorded_by: locals.user.id
-			})
-			.select()
-			.single();
-
-		if (snapErr || !snapshot) return fail(500, { error: 'error.generic' });
+		const snapshot = await one<{ id: string }>(sql`
+			insert into score_snapshots (
+				organization_id, node_id, composite_score, composite_tier,
+				metric_details, cycle_label, notes, recorded_by
+			) values (
+				${mgr.organizationId}, ${params.id}, ${compositeScore}, ${compositeTier},
+				${sql.json(metricDetails as never)},
+				${cycleLabel}, ${notes}, ${locals.user.id}
+			)
+			returning id
+		`);
 
 		// Lock all metrics on this node — prevents employee edits
-		await db
-			.from('metrics')
-			.update({
-				locked_by_snapshot_id: snapshot.id,
-				updated_at: new Date().toISOString()
-			})
-			.eq('node_id', params.id);
+		await sql`
+			update metrics
+			set locked_by_snapshot_id = ${snapshot.id},
+			    updated_at = now()
+			where node_id = ${params.id}
+		`;
 
 		return { snapshotSuccess: true, snapshotId: snapshot.id };
 	},
@@ -638,25 +678,22 @@ export const actions: Actions = {
 		if (!snapshotId || !compositeTier) return fail(400, { error: 'validation.field_required' });
 
 		// Verify snapshot belongs to target node
-		const { data: snapshot } = await db
-			.from('score_snapshots')
-			.select('id')
-			.eq('id', snapshotId)
-			.eq('node_id', params.id)
-			.single();
+		const snapshot = await maybeOne<{ id: string }>(sql`
+			select id from score_snapshots
+			where id = ${snapshotId} and node_id = ${params.id}
+		`);
 
 		if (!snapshot) return fail(404, { error: 'error.generic' });
 
-		await db
-			.from('score_snapshots')
-			.update({
-				composite_score: compositeScore,
-				composite_tier: compositeTier,
-				notes,
-				adjusted_by: locals.user.id,
-				adjusted_at: new Date().toISOString()
-			})
-			.eq('id', snapshotId);
+		await sql`
+			update score_snapshots
+			set composite_score = ${compositeScore},
+			    composite_tier = ${compositeTier},
+			    notes = ${notes},
+			    adjusted_by = ${locals.user.id},
+			    adjusted_at = now()
+			where id = ${snapshotId}
+		`;
 
 		return { adjustSuccess: true };
 	},
@@ -674,18 +711,16 @@ export const actions: Actions = {
 		if (!mgr) return fail(403, { error: 'error.generic' });
 
 		// Unlock all metrics for this node
-		await db
-			.from('metrics')
-			.update({
-				locked_by_snapshot_id: null,
-				// Clear submission/approval so the next cycle starts fresh
-				submitted_at: null,
-				submitted_by: null,
-				approved_at: null,
-				approved_by: null,
-				updated_at: new Date().toISOString()
-			})
-			.eq('node_id', params.id);
+		await sql`
+			update metrics
+			set locked_by_snapshot_id = null,
+			    submitted_at = null,
+			    submitted_by = null,
+			    approved_at = null,
+			    approved_by = null,
+			    updated_at = now()
+			where node_id = ${params.id}
+		`;
 
 		return { newCycleSuccess: true };
 	}

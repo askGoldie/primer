@@ -31,7 +31,43 @@
 
 import { fail } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types.js';
-import { db } from '$lib/server/db.js';
+import { sql, maybeOne, many, one } from '$lib/server/db.js';
+
+/**
+ * Lookup the caller's active membership and its organization in one round-trip.
+ * Returns null when the user has no membership or the org row is missing.
+ */
+async function loadCallerMembership(userId: string): Promise<{
+	role: string;
+	organization: { id: string; name: string; cycle_cadence: string | null };
+} | null> {
+	const row = await maybeOne<{
+		role: string;
+		org_id: string;
+		org_name: string;
+		org_cycle_cadence: string | null;
+	}>(sql`
+		select
+			m.role,
+			o.id              as org_id,
+			o.name            as org_name,
+			o.cycle_cadence   as org_cycle_cadence
+		from org_members m
+		join organizations o on o.id = m.organization_id
+		where m.user_id = ${userId}
+		  and m.removed_at is null
+		limit 1
+	`);
+	if (!row) return null;
+	return {
+		role: row.role,
+		organization: {
+			id: row.org_id,
+			name: row.org_name,
+			cycle_cadence: row.org_cycle_cadence
+		}
+	};
+}
 
 /**
  * Fire-and-forget audit-log writer for hierarchy mutations.
@@ -62,16 +98,17 @@ async function writeHierarchyAudit(
 	context: string | null = null
 ): Promise<void> {
 	try {
-		await db.from('audit_log').insert({
-			organization_id: orgId,
-			entity_type: 'node',
-			entity_id: entityId,
-			action,
-			changed_by: userId,
-			previous_value: prev as never,
-			new_value: next as never,
-			context
-		});
+		await sql`
+			insert into audit_log (
+				organization_id, entity_type, entity_id, action, changed_by,
+				previous_value, new_value, context
+			) values (
+				${orgId}, 'node', ${entityId}, ${action}, ${userId},
+				${prev === null ? null : sql.json(prev as never)},
+				${next === null ? null : sql.json(next as never)},
+				${context}
+			)
+		`;
 	} catch (err) {
 		// Audit writes are advisory — log and continue so real user-visible
 		// mutations aren't blocked by audit failures (e.g. schema drift,
@@ -179,23 +216,31 @@ export const load: PageServerLoad = async ({ parent }) => {
 	}[] = [];
 
 	if (isOwner) {
-		const { data: memberRows } = await db
-			.from('org_members')
-			.select('id, user_id, role, users!org_members_user_id_fkey(name, email)')
-			.eq('organization_id', organization.id)
-			.is('removed_at', null)
-			.order('assigned_at', { ascending: true });
+		const memberRows = await many<{
+			id: string;
+			user_id: string;
+			role: string;
+			user_name: string | null;
+			user_email: string | null;
+		}>(sql`
+			select
+				m.id, m.user_id, m.role,
+				u.name  as user_name,
+				u.email as user_email
+			from org_members m
+			left join users u on u.id = m.user_id
+			where m.organization_id = ${organization.id}
+			  and m.removed_at is null
+			order by m.assigned_at asc
+		`);
 
-		members = (memberRows ?? []).map((m) => {
-			const user = m.users as { name: string; email: string } | null;
-			return {
-				id: m.id,
-				userId: m.user_id,
-				userName: user?.name ?? '',
-				userEmail: user?.email ?? '',
-				role: m.role
-			};
-		});
+		members = memberRows.map((m) => ({
+			id: m.id,
+			userId: m.user_id,
+			userName: m.user_name ?? '',
+			userEmail: m.user_email ?? '',
+			role: m.role
+		}));
 	}
 
 	// ── Visibility / access control ─────────────────────────────────────────
@@ -207,12 +252,16 @@ export const load: PageServerLoad = async ({ parent }) => {
 
 	if (showVisibility) {
 		// Fetch all nodes in org (for dropdowns and grant lookups)
-		const { data: allNodesRaw } = await db
-			.from('org_hierarchy_nodes')
-			.select('*, users!org_hierarchy_nodes_user_id_fkey(name)')
-			.eq('organization_id', organization.id);
-
-		const allNodes = allNodesRaw ?? [];
+		const allNodes = await many<{
+			id: string;
+			name: string;
+			title: string | null;
+			peer_visibility: string;
+		}>(sql`
+			select id, name, title, peer_visibility
+			from org_hierarchy_nodes
+			where organization_id = ${organization.id}
+		`);
 
 		// Current node's peer_visibility setting (only if user has a node)
 		if (userNode) {
@@ -223,33 +272,36 @@ export const load: PageServerLoad = async ({ parent }) => {
 		}
 
 		// Active visibility grants — scope depends on whether the caller has a node
-		let grantsRaw;
+		interface GrantRow {
+			id: string;
+			grantee_node_id: string;
+			scope_node_id: string | null;
+			visibility: string;
+			created_at: string;
+		}
+		let grantsRaw: GrantRow[] = [];
 		if (userNode) {
-			const { data } = await db
-				.from('visibility_grants')
-				.select('*')
-				.eq('organization_id', organization.id)
-				.eq(
-					'granted_by',
-					await db
-						.from('org_hierarchy_nodes')
-						.select('user_id')
-						.eq('id', userNode.id)
-						.single()
-						.then((r) => r.data?.user_id ?? '')
-				)
-				.is('revoked_at', null);
-			grantsRaw = data;
+			const userNodeRow = await maybeOne<{ user_id: string | null }>(sql`
+				select user_id from org_hierarchy_nodes where id = ${userNode.id}
+			`);
+			const grantedById = userNodeRow?.user_id ?? '';
+			grantsRaw = await many<GrantRow>(sql`
+				select id, grantee_node_id, scope_node_id, visibility, created_at
+				from visibility_grants
+				where organization_id = ${organization.id}
+				  and granted_by = ${grantedById}
+				  and revoked_at is null
+			`);
 		} else {
-			const { data } = await db
-				.from('visibility_grants')
-				.select('*')
-				.eq('organization_id', organization.id)
-				.is('revoked_at', null);
-			grantsRaw = data;
+			grantsRaw = await many<GrantRow>(sql`
+				select id, grantee_node_id, scope_node_id, visibility, created_at
+				from visibility_grants
+				where organization_id = ${organization.id}
+				  and revoked_at is null
+			`);
 		}
 
-		grants = (grantsRaw ?? []).map((g) => {
+		grants = grantsRaw.map((g) => {
 			const granteeNode = allNodes.find((n) => n.id === g.grantee_node_id);
 			const scopeNode = g.scope_node_id ? allNodes.find((n) => n.id === g.scope_node_id) : null;
 			return {
@@ -295,47 +347,63 @@ export const load: PageServerLoad = async ({ parent }) => {
 	let assignableMembers: AssignableMember[] = [];
 
 	if (canEditHierarchy) {
-		const { data: hNodes } = await db
-			.from('org_hierarchy_nodes')
-			.select(
-				'id, parent_id, node_type, name, title, description, sort_order, user_id, users!org_hierarchy_nodes_user_id_fkey(name)'
-			)
-			.eq('organization_id', organization.id)
-			.order('sort_order', { ascending: true });
+		const hNodes = await many<{
+			id: string;
+			parent_id: string | null;
+			node_type: 'executive_leader' | 'department' | 'team' | 'individual';
+			name: string;
+			title: string | null;
+			description: string | null;
+			sort_order: number | null;
+			user_id: string | null;
+			user_name: string | null;
+		}>(sql`
+			select
+				n.id, n.parent_id, n.node_type, n.name, n.title, n.description,
+				n.sort_order, n.user_id,
+				u.name as user_name
+			from org_hierarchy_nodes n
+			left join users u on u.id = n.user_id
+			where n.organization_id = ${organization.id}
+			order by n.sort_order asc
+		`);
 
-		hierarchyNodes = (hNodes ?? []).map((n) => {
-			const userRel = n.users as { name: string } | null;
-			return {
-				id: n.id,
-				parentId: n.parent_id,
-				nodeType: n.node_type,
-				name: n.name,
-				title: n.title,
-				description: n.description,
-				sortOrder: n.sort_order ?? 0,
-				userId: n.user_id,
-				userName: userRel?.name ?? null
-			};
-		});
+		hierarchyNodes = hNodes.map((n) => ({
+			id: n.id,
+			parentId: n.parent_id,
+			nodeType: n.node_type,
+			name: n.name,
+			title: n.title,
+			description: n.description,
+			sortOrder: n.sort_order ?? 0,
+			userId: n.user_id,
+			userName: n.user_name ?? null
+		}));
 
 		// Active org members — used by the user-assignment dropdown on the
 		// create/edit form. Offboarded members (removed_at IS NOT NULL) are
 		// excluded because assigning them makes no sense.
-		const { data: assignRows } = await db
-			.from('org_members')
-			.select('user_id, users!org_members_user_id_fkey(name, email)')
-			.eq('organization_id', organization.id)
-			.is('removed_at', null);
+		const assignRows = await many<{
+			user_id: string;
+			user_name: string | null;
+			user_email: string | null;
+		}>(sql`
+			select
+				m.user_id,
+				u.name  as user_name,
+				u.email as user_email
+			from org_members m
+			left join users u on u.id = m.user_id
+			where m.organization_id = ${organization.id}
+			  and m.removed_at is null
+		`);
 
-		assignableMembers = (assignRows ?? [])
-			.map((r) => {
-				const u = r.users as { name: string; email: string } | null;
-				return {
-					userId: r.user_id,
-					name: u?.name ?? '',
-					email: u?.email ?? ''
-				};
-			})
+		assignableMembers = assignRows
+			.map((r) => ({
+				userId: r.user_id,
+				name: r.user_name ?? '',
+				email: r.user_email ?? ''
+			}))
 			.sort((a, b) => a.name.localeCompare(b.name));
 	}
 
@@ -354,50 +422,65 @@ export const load: PageServerLoad = async ({ parent }) => {
 
 	if (canViewAudit) {
 		// Load all hierarchy nodes with their user bindings
-		const { data: allNodes } = await db
-			.from('org_hierarchy_nodes')
-			.select('*, users!org_hierarchy_nodes_user_id_fkey(name, email)')
-			.eq('organization_id', organization.id)
-			.order('sort_order', { ascending: true });
+		const allNodes = await many<{
+			id: string;
+			name: string;
+			title: string | null;
+			node_type: string;
+			parent_id: string | null;
+			user_name: string | null;
+			user_email: string | null;
+		}>(sql`
+			select
+				n.id, n.name, n.title, n.node_type, n.parent_id,
+				u.name  as user_name,
+				u.email as user_email
+			from org_hierarchy_nodes n
+			left join users u on u.id = n.user_id
+			where n.organization_id = ${organization.id}
+			order by n.sort_order asc
+		`);
 
 		// For each node, get latest snapshot + metric counts + lock state.
 		// This is N+1 on purpose — the admin surface gets rare traffic and
 		// the per-node detail is the whole point of the view.
 		auditNodes = await Promise.all(
-			(allNodes ?? []).map(async (node) => {
-				const userData = node.users as { name: string; email: string } | null;
+			allNodes.map(async (node) => {
+				const latestSnapshot = await maybeOne<{
+					id: string;
+					composite_score: number;
+					composite_tier: string;
+					cycle_label: string | null;
+					created_at: string;
+				}>(sql`
+					select id, composite_score, composite_tier, cycle_label, created_at
+					from score_snapshots
+					where node_id = ${node.id}
+					order by created_at desc
+					limit 1
+				`);
 
-				const { data: snapshots } = await db
-					.from('score_snapshots')
-					.select('id, composite_score, composite_tier, cycle_label, created_at')
-					.eq('node_id', node.id)
-					.order('created_at', { ascending: false })
-					.limit(1);
+				const metricCountRow = await one<{ count: string }>(sql`
+					select count(*)::text as count from metrics where node_id = ${node.id}
+				`);
+				const lockedCountRow = await one<{ count: string }>(sql`
+					select count(*)::text as count from metrics
+					where node_id = ${node.id} and locked_by_snapshot_id is not null
+				`);
+				const pendingCountRow = await one<{ count: string }>(sql`
+					select count(*)::text as count from metrics
+					where node_id = ${node.id}
+					  and submitted_at is not null
+					  and approved_at is null
+				`);
+				const perfLogCountRow = await one<{ count: string }>(sql`
+					select count(*)::text as count from performance_logs where node_id = ${node.id}
+				`);
 
-				const latestSnapshot = snapshots?.[0] ?? null;
-
-				const { count: metricCount } = await db
-					.from('metrics')
-					.select('id', { count: 'exact', head: true })
-					.eq('node_id', node.id);
-
-				const { count: lockedCount } = await db
-					.from('metrics')
-					.select('id', { count: 'exact', head: true })
-					.eq('node_id', node.id)
-					.not('locked_by_snapshot_id', 'is', null);
-
-				const { count: pendingCount } = await db
-					.from('metrics')
-					.select('id', { count: 'exact', head: true })
-					.eq('node_id', node.id)
-					.not('submitted_at', 'is', null)
-					.is('approved_at', null);
-
-				const { count: perfLogCount } = await db
-					.from('performance_logs')
-					.select('id', { count: 'exact', head: true })
-					.eq('node_id', node.id);
+				const metricCount = Number(metricCountRow.count);
+				const lockedCount = Number(lockedCountRow.count);
+				const pendingCount = Number(pendingCountRow.count);
+				const perfLogCount = Number(perfLogCountRow.count);
 
 				return {
 					id: node.id,
@@ -405,8 +488,8 @@ export const load: PageServerLoad = async ({ parent }) => {
 					title: node.title,
 					nodeType: node.node_type,
 					parentId: node.parent_id,
-					userName: userData?.name ?? null,
-					userEmail: userData?.email ?? null,
+					userName: node.user_name ?? null,
+					userEmail: node.user_email ?? null,
 					latestSnapshot: latestSnapshot
 						? {
 								id: latestSnapshot.id,
@@ -416,11 +499,11 @@ export const load: PageServerLoad = async ({ parent }) => {
 								createdAt: latestSnapshot.created_at
 							}
 						: null,
-					metricCount: metricCount ?? 0,
-					lockedCount: lockedCount ?? 0,
-					pendingCount: pendingCount ?? 0,
-					perfLogCount: perfLogCount ?? 0,
-					isLocked: (lockedCount ?? 0) > 0
+					metricCount,
+					lockedCount,
+					pendingCount,
+					perfLogCount,
+					isLocked: lockedCount > 0
 				};
 			})
 		);
@@ -435,31 +518,39 @@ export const load: PageServerLoad = async ({ parent }) => {
 
 		// ── Pending placement requests (owner / hr_admin) ───────────────────
 		if (canManageMembers(role)) {
-			const { data: placements } = await db
-				.from('placement_requests')
-				.select('*, users!placement_requests_user_id_fkey(name, email)')
-				.eq('organization_id', organization.id)
-				.is('resolved_at', null)
-				.order('requested_at', { ascending: false });
+			const placements = await many<{
+				id: string;
+				user_id: string;
+				user_name: string | null;
+				user_email: string | null;
+				requested_at: string;
+			}>(sql`
+				select
+					p.id, p.user_id, p.requested_at,
+					u.name  as user_name,
+					u.email as user_email
+				from placement_requests p
+				left join users u on u.id = p.user_id
+				where p.organization_id = ${organization.id}
+				  and p.resolved_at is null
+				order by p.requested_at desc
+			`);
 
-			pendingPlacements = (placements ?? []).map((p) => {
-				const userData = p.users as { name: string; email: string } | null;
-				return {
-					id: p.id,
-					userId: p.user_id,
-					userName: userData?.name ?? null,
-					userEmail: userData?.email ?? null,
-					requestedAt: p.requested_at
-				};
-			});
+			pendingPlacements = placements.map((p) => ({
+				id: p.id,
+				userId: p.user_id,
+				userName: p.user_name ?? null,
+				userEmail: p.user_email ?? null,
+				requestedAt: p.requested_at
+			}));
 		}
 
 		// ── Department overview (system_admin / owner only) ─────────────────
 		if (isSystemAdmin) {
-			const rootNodes = (allNodes ?? []).filter((n) => n.parent_id === null);
+			const rootNodes = allNodes.filter((n) => n.parent_id === null);
 			const topLevelDepts =
 				rootNodes.length > 0
-					? (allNodes ?? []).filter((n) => rootNodes.some((r) => r.id === n.parent_id))
+					? allNodes.filter((n) => rootNodes.some((r) => r.id === n.parent_id))
 					: [];
 
 			const deptNodes = topLevelDepts.length > 0 ? topLevelDepts : rootNodes;
@@ -545,20 +636,9 @@ export const actions: Actions = {
 			return fail(403, { error: 'error.generic' });
 		}
 
-		const { data: memberships } = await db
-			.from('org_members')
-			.select('*, organizations(*)')
-			.eq('user_id', locals.user.id)
-			.is('removed_at', null)
-			.limit(1);
-
-		const membershipResult = memberships?.[0];
-		if (!membershipResult?.organizations) {
-			return fail(403, { error: 'error.generic' });
-		}
-
-		const organization = membershipResult.organizations;
-		if (!canManageOrgSettings(membershipResult.role as OrgRole)) {
+		const ctx = await loadCallerMembership(locals.user.id);
+		if (!ctx) return fail(403, { error: 'error.generic' });
+		if (!canManageOrgSettings(ctx.role as OrgRole)) {
 			return fail(403, { error: 'error.generic' });
 		}
 
@@ -570,14 +650,13 @@ export const actions: Actions = {
 			return fail(400, { error: 'validation.field_required' });
 		}
 
-		await db
-			.from('organizations')
-			.update({
-				name,
-				inquiry_enabled: inquiryEnabled,
-				updated_at: new Date().toISOString()
-			})
-			.eq('id', organization.id);
+		await sql`
+			update organizations
+			set name = ${name},
+			    inquiry_enabled = ${inquiryEnabled},
+			    updated_at = now()
+			where id = ${ctx.organization.id}
+		`;
 
 		return { success: true };
 	},
@@ -596,19 +675,9 @@ export const actions: Actions = {
 			return fail(403, { error: 'error.generic' });
 		}
 
-		const { data: memberships } = await db
-			.from('org_members')
-			.select('*, organizations(*)')
-			.eq('user_id', locals.user.id)
-			.is('removed_at', null)
-			.limit(1);
-
-		const membershipResult = memberships?.[0];
-		if (!membershipResult?.organizations) {
-			return fail(403, { error: 'error.generic' });
-		}
-
-		if (!canManageOrgSettings(membershipResult.role as OrgRole)) {
+		const ctx = await loadCallerMembership(locals.user.id);
+		if (!ctx) return fail(403, { error: 'error.generic' });
+		if (!canManageOrgSettings(ctx.role as OrgRole)) {
 			return fail(403, { error: 'error.generic' });
 		}
 
@@ -619,13 +688,11 @@ export const actions: Actions = {
 			return fail(400, { error: 'validation.field_required' });
 		}
 
-		await db
-			.from('organizations')
-			.update({
-				cycle_cadence: cycleCadence,
-				updated_at: new Date().toISOString()
-			})
-			.eq('id', membershipResult.organizations.id);
+		await sql`
+			update organizations
+			set cycle_cadence = ${cycleCadence}, updated_at = now()
+			where id = ${ctx.organization.id}
+		`;
 
 		return { cadenceSuccess: true };
 	},
@@ -638,12 +705,11 @@ export const actions: Actions = {
 			return fail(403, { error: 'error.generic' });
 		}
 
-		const { data: callerMembership } = await db
-			.from('org_members')
-			.select('role, organization_id')
-			.eq('user_id', locals.user.id)
-			.is('removed_at', null)
-			.single();
+		const callerMembership = await maybeOne<{ role: string; organization_id: string }>(sql`
+			select role, organization_id from org_members
+			where user_id = ${locals.user.id} and removed_at is null
+			limit 1
+		`);
 
 		if (!callerMembership || !canAssignRoles(callerMembership.role as OrgRole)) {
 			return fail(403, { error: 'error.generic' });
@@ -669,12 +735,10 @@ export const actions: Actions = {
 			return fail(400, { error: 'validation.field_required' });
 		}
 
-		const { data: targetMember } = await db
-			.from('org_members')
-			.select('user_id, role')
-			.eq('id', membershipId)
-			.eq('organization_id', callerMembership.organization_id)
-			.single();
+		const targetMember = await maybeOne<{ user_id: string; role: string }>(sql`
+			select user_id, role from org_members
+			where id = ${membershipId} and organization_id = ${callerMembership.organization_id}
+		`);
 
 		if (!targetMember) {
 			return fail(404, { error: 'error.generic' });
@@ -684,7 +748,7 @@ export const actions: Actions = {
 			return fail(400, { error: 'settings.cannot_change_own_role' });
 		}
 
-		await db.from('org_members').update({ role: newRole }).eq('id', membershipId);
+		await sql`update org_members set role = ${newRole} where id = ${membershipId}`;
 
 		return { roleSuccess: true };
 	},
@@ -706,14 +770,11 @@ export const actions: Actions = {
 			return fail(400, { error: 'validation.field_required' });
 		}
 
-		const { data: memberships } = await db
-			.from('org_members')
-			.select('organization_id, role')
-			.eq('user_id', locals.user.id)
-			.is('removed_at', null)
-			.limit(1);
-
-		const membershipData = memberships?.[0];
+		const membershipData = await maybeOne<{ organization_id: string; role: string }>(sql`
+			select organization_id, role from org_members
+			where user_id = ${locals.user.id} and removed_at is null
+			limit 1
+		`);
 		if (!membershipData || !canManageVisibility(membershipData.role as OrgRole)) {
 			return fail(403, { error: 'error.generic' });
 		}
@@ -721,22 +782,19 @@ export const actions: Actions = {
 		const orgId = membershipData.organization_id;
 		if (!orgId) return fail(403, { error: 'error.generic' });
 
-		const { data: ownNode } = await db
-			.from('org_hierarchy_nodes')
-			.select('id')
-			.eq('organization_id', orgId)
-			.eq('user_id', locals.user.id)
-			.single();
+		const ownNode = await maybeOne<{ id: string }>(sql`
+			select id from org_hierarchy_nodes
+			where organization_id = ${orgId} and user_id = ${locals.user.id}
+		`);
 
 		if (!ownNode) return fail(403, { error: 'error.generic' });
 
-		const { error: updateError } = await db
-			.from('org_hierarchy_nodes')
-			.update({ peer_visibility: peerVisibility })
-			.eq('id', ownNode.id);
-
-		if (updateError) {
-			console.error('updatePeerVisibility error:', updateError);
+		try {
+			await sql`
+				update org_hierarchy_nodes set peer_visibility = ${peerVisibility} where id = ${ownNode.id}
+			`;
+		} catch (err) {
+			console.error('updatePeerVisibility error:', err);
 			return fail(500, { error: 'error.generic' });
 		}
 
@@ -762,28 +820,26 @@ export const actions: Actions = {
 			return fail(400, { error: 'validation.field_required' });
 		}
 
-		const { data: memberships } = await db
-			.from('org_members')
-			.select('organization_id, role')
-			.eq('user_id', locals.user.id)
-			.is('removed_at', null)
-			.limit(1);
-
-		const membershipData = memberships?.[0];
+		const membershipData = await maybeOne<{ organization_id: string; role: string }>(sql`
+			select organization_id, role from org_members
+			where user_id = ${locals.user.id} and removed_at is null
+			limit 1
+		`);
 		if (!membershipData || !canManageVisibility(membershipData.role as OrgRole)) {
 			return fail(403, { error: 'error.generic' });
 		}
 
-		const { error: insertError } = await db.from('visibility_grants').insert({
-			organization_id: membershipData.organization_id,
-			grantee_node_id: granteeNodeId,
-			scope_node_id: scopeNodeId,
-			visibility,
-			granted_by: locals.user.id
-		});
-
-		if (insertError) {
-			console.error('createGrant error:', insertError);
+		try {
+			await sql`
+				insert into visibility_grants (
+					organization_id, grantee_node_id, scope_node_id, visibility, granted_by
+				) values (
+					${membershipData.organization_id}, ${granteeNodeId}, ${scopeNodeId},
+					${visibility}, ${locals.user.id}
+				)
+			`;
+		} catch (err) {
+			console.error('createGrant error:', err);
 			return fail(500, { error: 'error.generic' });
 		}
 
@@ -802,28 +858,28 @@ export const actions: Actions = {
 
 		if (!grantId) return fail(400, { error: 'validation.field_required' });
 
-		const { data: mem } = await db
-			.from('org_members')
-			.select('role, organization_id')
-			.eq('user_id', locals.user.id)
-			.is('removed_at', null)
-			.single();
+		const mem = await maybeOne<{ role: string; organization_id: string }>(sql`
+			select role, organization_id from org_members
+			where user_id = ${locals.user.id} and removed_at is null
+			limit 1
+		`);
 
-		let revokeQuery = db
-			.from('visibility_grants')
-			.update({ revoked_at: new Date().toISOString() })
-			.eq('id', grantId);
-
-		if (mem?.role === 'system_admin' || mem?.role === 'owner') {
-			revokeQuery = revokeQuery.eq('organization_id', mem.organization_id);
-		} else {
-			revokeQuery = revokeQuery.eq('granted_by', locals.user.id);
-		}
-
-		const { error: revokeError } = await revokeQuery;
-
-		if (revokeError) {
-			console.error('revokeGrant error:', revokeError);
+		try {
+			if (mem?.role === 'system_admin' || mem?.role === 'owner') {
+				await sql`
+					update visibility_grants
+					set revoked_at = now()
+					where id = ${grantId} and organization_id = ${mem.organization_id}
+				`;
+			} else {
+				await sql`
+					update visibility_grants
+					set revoked_at = now()
+					where id = ${grantId} and granted_by = ${locals.user.id}
+				`;
+			}
+		} catch (err) {
+			console.error('revokeGrant error:', err);
 			return fail(500, { error: 'error.generic' });
 		}
 
@@ -839,20 +895,9 @@ export const actions: Actions = {
 	resolvePlacement: async ({ request, locals }) => {
 		if (!locals.user) return fail(403);
 
-		const { data: memberships } = await db
-			.from('org_members')
-			.select('*, organizations(*)')
-			.eq('user_id', locals.user.id)
-			.is('removed_at', null)
-			.limit(1);
-
-		const membershipResult = memberships?.[0];
-		if (!membershipResult?.organizations) {
-			return fail(403, { error: 'error.generic' });
-		}
-		const organization = membershipResult.organizations;
-		const role = membershipResult.role as OrgRole;
-		if (!canManageMembers(role)) {
+		const ctx = await loadCallerMembership(locals.user.id);
+		if (!ctx) return fail(403, { error: 'error.generic' });
+		if (!canManageMembers(ctx.role as OrgRole)) {
 			return fail(403, { error: 'error.generic' });
 		}
 
@@ -860,14 +905,11 @@ export const actions: Actions = {
 		const placementId = formData.get('placementId')?.toString();
 		if (!placementId) return fail(400, { error: 'validation.field_required' });
 
-		await db
-			.from('placement_requests')
-			.update({
-				resolved_at: new Date().toISOString(),
-				resolved_by: locals.user.id
-			})
-			.eq('id', placementId)
-			.eq('organization_id', organization.id);
+		await sql`
+			update placement_requests
+			set resolved_at = now(), resolved_by = ${locals.user.id}
+			where id = ${placementId} and organization_id = ${ctx.organization.id}
+		`;
 
 		return { resolvePlacementSuccess: true };
 	},
@@ -880,19 +922,9 @@ export const actions: Actions = {
 	bulkSnapshot: async ({ request, locals }) => {
 		if (!locals.user) return fail(403);
 
-		const { data: memberships } = await db
-			.from('org_members')
-			.select('*, organizations(*)')
-			.eq('user_id', locals.user.id)
-			.is('removed_at', null)
-			.limit(1);
-
-		const membershipResult = memberships?.[0];
-		if (!membershipResult?.organizations) {
-			return fail(403, { error: 'error.generic' });
-		}
-		const organization = membershipResult.organizations;
-		if (membershipResult.role !== 'owner' && membershipResult.role !== 'system_admin') {
+		const ctx = await loadCallerMembership(locals.user.id);
+		if (!ctx) return fail(403, { error: 'error.generic' });
+		if (ctx.role !== 'owner' && ctx.role !== 'system_admin') {
 			return fail(403, { error: 'error.generic' });
 		}
 
@@ -905,11 +937,10 @@ export const actions: Actions = {
 
 		let targetNodeIds: string[];
 		if (scope === 'all') {
-			const { data: allNodes } = await db
-				.from('org_hierarchy_nodes')
-				.select('id')
-				.eq('organization_id', organization.id);
-			targetNodeIds = (allNodes ?? []).map((n) => n.id);
+			const allNodes = await many<{ id: string }>(sql`
+				select id from org_hierarchy_nodes where organization_id = ${ctx.organization.id}
+			`);
+			targetNodeIds = allNodes.map((n) => n.id);
 		} else {
 			targetNodeIds = (scope ?? '').split(',').filter(Boolean);
 		}
@@ -918,12 +949,21 @@ export const actions: Actions = {
 		let skipped = 0;
 
 		for (const nodeId of targetNodeIds) {
-			const { data: nodeMetrics } = await db
-				.from('metrics')
-				.select('id, name, measurement_type, origin, current_value, current_tier, weight')
-				.eq('node_id', nodeId);
+			const nodeMetrics = await many<{
+				id: string;
+				name: string;
+				measurement_type: string;
+				origin: string;
+				current_value: string | number | null;
+				current_tier: string | null;
+				weight: number | null;
+			}>(sql`
+				select id, name, measurement_type, origin, current_value, current_tier, weight
+				from metrics
+				where node_id = ${nodeId}
+			`);
 
-			const scoreable = (nodeMetrics ?? []).filter((m) => m.current_tier && m.weight);
+			const scoreable = nodeMetrics.filter((m) => m.current_tier && m.weight);
 
 			if (scoreable.length === 0) {
 				skipped++;
@@ -944,38 +984,30 @@ export const actions: Actions = {
 					name: m.name,
 					measurementType: m.measurement_type,
 					origin: m.origin,
-					currentValue: m.current_value,
+					currentValue: m.current_value as string | number | null,
 					currentTier: m.current_tier as TierLevel,
 					weight: m.weight as number
 				}))
 			);
 
-			const { data: snapshot } = await db
-				.from('score_snapshots')
-				.insert({
-					organization_id: organization.id,
-					node_id: nodeId,
-					composite_score: compositeScore,
-					composite_tier: compositeTier,
-					metric_details: metricDetails as unknown as Record<string, unknown>,
-					cycle_label: cycleLabel,
-					notes,
-					recorded_by: locals.user.id
-				})
-				.select()
-				.single();
+			const snapshot = await one<{ id: string }>(sql`
+				insert into score_snapshots (
+					organization_id, node_id, composite_score, composite_tier,
+					metric_details, cycle_label, notes, recorded_by
+				) values (
+					${ctx.organization.id}, ${nodeId}, ${compositeScore}, ${compositeTier},
+					${sql.json(metricDetails as never)}, ${cycleLabel}, ${notes}, ${locals.user.id}
+				)
+				returning id
+			`);
 
-			if (snapshot) {
-				await db
-					.from('metrics')
-					.update({
-						locked_by_snapshot_id: snapshot.id,
-						updated_at: new Date().toISOString()
-					})
-					.eq('node_id', nodeId);
+			await sql`
+				update metrics
+				set locked_by_snapshot_id = ${snapshot.id}, updated_at = now()
+				where node_id = ${nodeId}
+			`;
 
-				captured++;
-			}
+			captured++;
 		}
 
 		return { bulkSnapshotSuccess: true, captured, skipped };
@@ -989,19 +1021,9 @@ export const actions: Actions = {
 	bulkUnlock: async ({ request, locals }) => {
 		if (!locals.user) return fail(403);
 
-		const { data: memberships } = await db
-			.from('org_members')
-			.select('*, organizations(*)')
-			.eq('user_id', locals.user.id)
-			.is('removed_at', null)
-			.limit(1);
-
-		const membershipResult = memberships?.[0];
-		if (!membershipResult?.organizations) {
-			return fail(403, { error: 'error.generic' });
-		}
-		const organization = membershipResult.organizations;
-		if (membershipResult.role !== 'owner' && membershipResult.role !== 'system_admin') {
+		const ctx = await loadCallerMembership(locals.user.id);
+		if (!ctx) return fail(403, { error: 'error.generic' });
+		if (ctx.role !== 'owner' && ctx.role !== 'system_admin') {
 			return fail(403, { error: 'error.generic' });
 		}
 
@@ -1010,27 +1032,25 @@ export const actions: Actions = {
 
 		let targetNodeIds: string[];
 		if (scope === 'all') {
-			const { data: allNodes } = await db
-				.from('org_hierarchy_nodes')
-				.select('id')
-				.eq('organization_id', organization.id);
-			targetNodeIds = (allNodes ?? []).map((n) => n.id);
+			const allNodes = await many<{ id: string }>(sql`
+				select id from org_hierarchy_nodes where organization_id = ${ctx.organization.id}
+			`);
+			targetNodeIds = allNodes.map((n) => n.id);
 		} else {
 			targetNodeIds = (scope ?? '').split(',').filter(Boolean);
 		}
 
 		for (const nodeId of targetNodeIds) {
-			await db
-				.from('metrics')
-				.update({
-					locked_by_snapshot_id: null,
-					submitted_at: null,
-					submitted_by: null,
-					approved_at: null,
-					approved_by: null,
-					updated_at: new Date().toISOString()
-				})
-				.eq('node_id', nodeId);
+			await sql`
+				update metrics
+				set locked_by_snapshot_id = null,
+				    submitted_at = null,
+				    submitted_by = null,
+				    approved_at = null,
+				    approved_by = null,
+				    updated_at = now()
+				where node_id = ${nodeId}
+			`;
 		}
 
 		return { bulkUnlockSuccess: true, unlocked: targetNodeIds.length };
@@ -1057,20 +1077,13 @@ export const actions: Actions = {
 	createHierarchyNode: async ({ request, locals }) => {
 		if (!locals.user) return fail(403, { error: 'error.generic' });
 
-		const { data: memberships } = await db
-			.from('org_members')
-			.select('*, organizations(*)')
-			.eq('user_id', locals.user.id)
-			.is('removed_at', null)
-			.limit(1);
-
-		const m = memberships?.[0];
-		if (!m?.organizations) return fail(403, { error: 'error.generic' });
-		const organization = m.organizations;
-		const r = m.role as OrgRole;
+		const ctx = await loadCallerMembership(locals.user.id);
+		if (!ctx) return fail(403, { error: 'error.generic' });
+		const r = ctx.role as OrgRole;
 		if (r !== 'owner' && r !== 'system_admin' && r !== 'hr_admin') {
 			return fail(403, { error: 'error.generic' });
 		}
+		const organization = ctx.organization;
 
 		const fd = await request.formData();
 		const nodeType = fd.get('nodeType')?.toString() as HierarchyNodeType | undefined;
@@ -1092,11 +1105,9 @@ export const actions: Actions = {
 		// Containment validation — look up the parent's node_type if present.
 		let parentType: HierarchyNodeType | null = null;
 		if (parentId) {
-			const { data: parent } = await db
-				.from('org_hierarchy_nodes')
-				.select('node_type, organization_id')
-				.eq('id', parentId)
-				.single();
+			const parent = await maybeOne<{ node_type: string; organization_id: string }>(sql`
+				select node_type, organization_id from org_hierarchy_nodes where id = ${parentId}
+			`);
 			if (!parent || parent.organization_id !== organization.id) {
 				return fail(400, { error: 'hierarchy.parent_not_found' });
 			}
@@ -1107,37 +1118,38 @@ export const actions: Actions = {
 		}
 
 		// Next sort_order among siblings.
-		const { data: siblings } = await db
-			.from('org_hierarchy_nodes')
-			.select('sort_order')
-			.eq('organization_id', organization.id)
-			.eq('parent_id', parentId as string);
-		const nextSort =
-			((siblings ?? []).reduce((max, s) => Math.max(max, s.sort_order ?? 0), -1) as number) + 1;
+		const siblings = parentId
+			? await many<{ sort_order: number | null }>(sql`
+					select sort_order from org_hierarchy_nodes
+					where organization_id = ${organization.id} and parent_id = ${parentId}
+				`)
+			: await many<{ sort_order: number | null }>(sql`
+					select sort_order from org_hierarchy_nodes
+					where organization_id = ${organization.id} and parent_id is null
+				`);
+		const nextSort = siblings.reduce((max, s) => Math.max(max, s.sort_order ?? 0), -1) + 1;
 
-		const { data: inserted, error: insertError } = await db
-			.from('org_hierarchy_nodes')
-			.insert({
-				organization_id: organization.id,
-				parent_id: parentId,
-				node_type: nodeType,
-				name,
-				title,
-				description,
-				user_id: userId,
-				sort_order: nextSort,
-				created_by: locals.user.id
-			})
-			.select('*')
-			.single();
-		if (insertError || !inserted) {
-			console.error('createHierarchyNode error:', insertError);
+		let inserted: Record<string, unknown>;
+		try {
+			inserted = await one<Record<string, unknown>>(sql`
+				insert into org_hierarchy_nodes (
+					organization_id, parent_id, node_type, name, title, description,
+					user_id, sort_order, created_by
+				) values (
+					${organization.id}, ${parentId}, ${nodeType}, ${name}, ${title}, ${description},
+					${userId}, ${nextSort}, ${locals.user.id}
+				)
+				returning *
+			`);
+		} catch (err) {
+			console.error('createHierarchyNode error:', err);
 			return fail(500, { error: 'error.generic' });
 		}
 
+		const insertedId = inserted.id as string;
 		await writeHierarchyAudit(
 			organization.id,
-			inserted.id,
+			insertedId,
 			'created',
 			locals.user.id,
 			null,
@@ -1147,7 +1159,7 @@ export const actions: Actions = {
 
 		// Return the new id so the client can build an inverse-delete command
 		// for undo/redo without having to diff the pre/post node list.
-		return { hierarchyCreateSuccess: true, nodeId: inserted.id };
+		return { hierarchyCreateSuccess: true, nodeId: insertedId };
 	},
 
 	/**
@@ -1158,20 +1170,13 @@ export const actions: Actions = {
 	updateHierarchyNode: async ({ request, locals }) => {
 		if (!locals.user) return fail(403, { error: 'error.generic' });
 
-		const { data: memberships } = await db
-			.from('org_members')
-			.select('*, organizations(*)')
-			.eq('user_id', locals.user.id)
-			.is('removed_at', null)
-			.limit(1);
-
-		const m = memberships?.[0];
-		if (!m?.organizations) return fail(403, { error: 'error.generic' });
-		const organization = m.organizations;
-		const r = m.role as OrgRole;
+		const ctx = await loadCallerMembership(locals.user.id);
+		if (!ctx) return fail(403, { error: 'error.generic' });
+		const r = ctx.role as OrgRole;
 		if (r !== 'owner' && r !== 'system_admin' && r !== 'hr_admin') {
 			return fail(403, { error: 'error.generic' });
 		}
+		const organization = ctx.organization;
 
 		const fd = await request.formData();
 		const nodeId = fd.get('nodeId')?.toString();
@@ -1187,31 +1192,29 @@ export const actions: Actions = {
 
 		// Snapshot the pre-state so audit_log can carry the previous values
 		// for client-side undo (shown in the undo pill as the inverse).
-		const { data: prev } = await db
-			.from('org_hierarchy_nodes')
-			.select('*')
-			.eq('id', nodeId)
-			.eq('organization_id', organization.id)
-			.single();
+		const prev = await maybeOne<Record<string, unknown>>(sql`
+			select * from org_hierarchy_nodes
+			where id = ${nodeId} and organization_id = ${organization.id}
+		`);
 
-		const { data: updated, error: updateError } = await db
-			.from('org_hierarchy_nodes')
-			.update({
-				name,
-				title,
-				description,
-				user_id: userId,
-				updated_at: new Date().toISOString()
-			})
-			.eq('id', nodeId)
-			.eq('organization_id', organization.id)
-			.select('*')
-			.single();
-
-		if (updateError || !updated) {
-			console.error('updateHierarchyNode error:', updateError);
+		let updated: Record<string, unknown> | null;
+		try {
+			updated = await maybeOne<Record<string, unknown>>(sql`
+				update org_hierarchy_nodes
+				set name = ${name},
+				    title = ${title},
+				    description = ${description},
+				    user_id = ${userId},
+				    updated_at = now()
+				where id = ${nodeId} and organization_id = ${organization.id}
+				returning *
+			`);
+		} catch (err) {
+			console.error('updateHierarchyNode error:', err);
 			return fail(500, { error: 'error.generic' });
 		}
+
+		if (!updated) return fail(500, { error: 'error.generic' });
 
 		await writeHierarchyAudit(
 			organization.id,
@@ -1233,20 +1236,13 @@ export const actions: Actions = {
 	deleteHierarchyNode: async ({ request, locals }) => {
 		if (!locals.user) return fail(403, { error: 'error.generic' });
 
-		const { data: memberships } = await db
-			.from('org_members')
-			.select('*, organizations(*)')
-			.eq('user_id', locals.user.id)
-			.is('removed_at', null)
-			.limit(1);
-
-		const m = memberships?.[0];
-		if (!m?.organizations) return fail(403, { error: 'error.generic' });
-		const organization = m.organizations;
-		const r = m.role as OrgRole;
+		const ctx = await loadCallerMembership(locals.user.id);
+		if (!ctx) return fail(403, { error: 'error.generic' });
+		const r = ctx.role as OrgRole;
 		if (r !== 'owner' && r !== 'system_admin' && r !== 'hr_admin') {
 			return fail(403, { error: 'error.generic' });
 		}
+		const organization = ctx.organization;
 
 		const fd = await request.formData();
 		const nodeId = fd.get('nodeId')?.toString();
@@ -1256,21 +1252,18 @@ export const actions: Actions = {
 		// the UI's undo stack, but audit still wants the pre-state on record
 		// for compliance and for the "restore from trash" feature we may
 		// add later (see Tier 2 soft-delete migration in the follow-up plan).
-		const { data: prev } = await db
-			.from('org_hierarchy_nodes')
-			.select('*')
-			.eq('id', nodeId)
-			.eq('organization_id', organization.id)
-			.single();
+		const prev = await maybeOne<Record<string, unknown>>(sql`
+			select * from org_hierarchy_nodes
+			where id = ${nodeId} and organization_id = ${organization.id}
+		`);
 
-		const { error: deleteError } = await db
-			.from('org_hierarchy_nodes')
-			.delete()
-			.eq('id', nodeId)
-			.eq('organization_id', organization.id);
-
-		if (deleteError) {
-			console.error('deleteHierarchyNode error:', deleteError);
+		try {
+			await sql`
+				delete from org_hierarchy_nodes
+				where id = ${nodeId} and organization_id = ${organization.id}
+			`;
+		} catch (err) {
+			console.error('deleteHierarchyNode error:', err);
 			return fail(500, { error: 'error.generic' });
 		}
 
@@ -1295,20 +1288,13 @@ export const actions: Actions = {
 	reparentHierarchyNode: async ({ request, locals }) => {
 		if (!locals.user) return fail(403, { error: 'error.generic' });
 
-		const { data: memberships } = await db
-			.from('org_members')
-			.select('*, organizations(*)')
-			.eq('user_id', locals.user.id)
-			.is('removed_at', null)
-			.limit(1);
-
-		const m = memberships?.[0];
-		if (!m?.organizations) return fail(403, { error: 'error.generic' });
-		const organization = m.organizations;
-		const r = m.role as OrgRole;
+		const ctx = await loadCallerMembership(locals.user.id);
+		if (!ctx) return fail(403, { error: 'error.generic' });
+		const r = ctx.role as OrgRole;
 		if (r !== 'owner' && r !== 'system_admin' && r !== 'hr_admin') {
 			return fail(403, { error: 'error.generic' });
 		}
+		const organization = ctx.organization;
 
 		const fd = await request.formData();
 		const nodeId = fd.get('nodeId')?.toString();
@@ -1319,12 +1305,12 @@ export const actions: Actions = {
 
 		// Load all nodes once so we can both resolve the child's node_type
 		// and walk descendants to guard against cycles.
-		const { data: allNodes } = await db
-			.from('org_hierarchy_nodes')
-			.select('id, parent_id, node_type')
-			.eq('organization_id', organization.id);
+		const nodes = await many<{ id: string; parent_id: string | null; node_type: string }>(sql`
+			select id, parent_id, node_type
+			from org_hierarchy_nodes
+			where organization_id = ${organization.id}
+		`);
 
-		const nodes = allNodes ?? [];
 		const self = nodes.find((n) => n.id === nodeId);
 		if (!self) return fail(404, { error: 'error.generic' });
 
@@ -1351,14 +1337,14 @@ export const actions: Actions = {
 
 		const previousParentId = self.parent_id;
 
-		const { error: reparentError } = await db
-			.from('org_hierarchy_nodes')
-			.update({ parent_id: newParentId, updated_at: new Date().toISOString() })
-			.eq('id', nodeId)
-			.eq('organization_id', organization.id);
-
-		if (reparentError) {
-			console.error('reparentHierarchyNode error:', reparentError);
+		try {
+			await sql`
+				update org_hierarchy_nodes
+				set parent_id = ${newParentId}, updated_at = now()
+				where id = ${nodeId} and organization_id = ${organization.id}
+			`;
+		} catch (err) {
+			console.error('reparentHierarchyNode error:', err);
 			return fail(500, { error: 'error.generic' });
 		}
 
@@ -1389,20 +1375,13 @@ export const actions: Actions = {
 	populateHierarchyTemplate: async ({ request, locals }) => {
 		if (!locals.user) return fail(403, { error: 'error.generic' });
 
-		const { data: memberships } = await db
-			.from('org_members')
-			.select('*, organizations(*)')
-			.eq('user_id', locals.user.id)
-			.is('removed_at', null)
-			.limit(1);
-
-		const m = memberships?.[0];
-		if (!m?.organizations) return fail(403, { error: 'error.generic' });
-		const organization = m.organizations;
-		const r = m.role as OrgRole;
+		const ctx = await loadCallerMembership(locals.user.id);
+		if (!ctx) return fail(403, { error: 'error.generic' });
+		const r = ctx.role as OrgRole;
 		if (r !== 'owner' && r !== 'system_admin' && r !== 'hr_admin') {
 			return fail(403, { error: 'error.generic' });
 		}
+		const organization = ctx.organization;
 
 		const fd = await request.formData();
 		const executiveCount = parseInt(fd.get('executiveCount')?.toString() ?? '3', 10);
@@ -1411,12 +1390,10 @@ export const actions: Actions = {
 		}
 
 		// Guard: only allowed for empty orgs.
-		const { data: existing } = await db
-			.from('org_hierarchy_nodes')
-			.select('id')
-			.eq('organization_id', organization.id)
-			.limit(1);
-		if ((existing ?? []).length > 0) {
+		const existing = await maybeOne<{ id: string }>(sql`
+			select id from org_hierarchy_nodes where organization_id = ${organization.id} limit 1
+		`);
+		if (existing) {
 			return fail(400, { error: 'hierarchy.template_nonempty' });
 		}
 
@@ -1432,22 +1409,17 @@ export const actions: Actions = {
 		): Promise<void> {
 			let sort = 0;
 			for (const node of tpl) {
-				const { data: inserted, error: insertErr } = await db
-					.from('org_hierarchy_nodes')
-					.insert({
-						organization_id: orgId,
-						parent_id: parentId,
-						node_type: node.nodeType,
-						name: node.name,
-						title: node.title ?? null,
-						sort_order: sort++,
-						created_by: createdBy
-					})
-					.select('id')
-					.single();
-				if (insertErr || !inserted) {
-					throw insertErr ?? new Error('populateHierarchyTemplate insert failed');
-				}
+				const titleOrNull = node.title ?? null;
+				const sortOrder = sort++;
+				const inserted = await one<{ id: string }>(sql`
+					insert into org_hierarchy_nodes (
+						organization_id, parent_id, node_type, name, title, sort_order, created_by
+					) values (
+						${orgId}, ${parentId}, ${node.nodeType}, ${node.name}, ${titleOrNull},
+						${sortOrder}, ${createdBy}
+					)
+					returning id
+				`);
 				if (node.children?.length) {
 					await createSubtree(node.children, inserted.id);
 				}
@@ -1484,52 +1456,44 @@ export const actions: Actions = {
 	dissolveHierarchyNode: async ({ request, locals }) => {
 		if (!locals.user) return fail(403, { error: 'error.generic' });
 
-		const { data: memberships } = await db
-			.from('org_members')
-			.select('*, organizations(*)')
-			.eq('user_id', locals.user.id)
-			.is('removed_at', null)
-			.limit(1);
-
-		const m = memberships?.[0];
-		if (!m?.organizations) return fail(403, { error: 'error.generic' });
-		const organization = m.organizations;
-		const r = m.role as OrgRole;
+		const ctx = await loadCallerMembership(locals.user.id);
+		if (!ctx) return fail(403, { error: 'error.generic' });
+		const r = ctx.role as OrgRole;
 		if (r !== 'owner' && r !== 'system_admin' && r !== 'hr_admin') {
 			return fail(403, { error: 'error.generic' });
 		}
+		const organization = ctx.organization;
 
 		const fd = await request.formData();
 		const nodeId = fd.get('nodeId')?.toString();
 		if (!nodeId) return fail(400, { error: 'validation.field_required' });
 
-		const { data: node } = await db
-			.from('org_hierarchy_nodes')
-			.select('id, parent_id, node_type, organization_id')
-			.eq('id', nodeId)
-			.eq('organization_id', organization.id)
-			.single();
+		const node = await maybeOne<{
+			id: string;
+			parent_id: string | null;
+			node_type: string;
+			organization_id: string;
+		}>(sql`
+			select id, parent_id, node_type, organization_id
+			from org_hierarchy_nodes
+			where id = ${nodeId} and organization_id = ${organization.id}
+		`);
 		if (!node) return fail(404, { error: 'error.generic' });
 
 		if (node.parent_id === null) {
 			return fail(400, { error: 'hierarchy.dissolve_root_disallowed' });
 		}
 
-		const { data: parent } = await db
-			.from('org_hierarchy_nodes')
-			.select('id, node_type')
-			.eq('id', node.parent_id)
-			.eq('organization_id', organization.id)
-			.single();
+		const parent = await maybeOne<{ id: string; node_type: string }>(sql`
+			select id, node_type from org_hierarchy_nodes
+			where id = ${node.parent_id} and organization_id = ${organization.id}
+		`);
 		if (!parent) return fail(400, { error: 'hierarchy.parent_not_found' });
 
-		const { data: children } = await db
-			.from('org_hierarchy_nodes')
-			.select('id, node_type')
-			.eq('parent_id', nodeId)
-			.eq('organization_id', organization.id);
-
-		const kids = children ?? [];
+		const kids = await many<{ id: string; node_type: string }>(sql`
+			select id, node_type from org_hierarchy_nodes
+			where parent_id = ${nodeId} and organization_id = ${organization.id}
+		`);
 
 		for (const c of kids) {
 			if (
@@ -1544,32 +1508,31 @@ export const actions: Actions = {
 
 		// Capture the full pre-dissolve shape of the node so the client can
 		// build an inverse command (restore node + reparent children back).
-		const { data: fullNode } = await db
-			.from('org_hierarchy_nodes')
-			.select('*')
-			.eq('id', nodeId)
-			.eq('organization_id', organization.id)
-			.single();
+		const fullNode = await maybeOne<Record<string, unknown>>(sql`
+			select * from org_hierarchy_nodes
+			where id = ${nodeId} and organization_id = ${organization.id}
+		`);
 
 		for (const c of kids) {
-			const { error: moveErr } = await db
-				.from('org_hierarchy_nodes')
-				.update({ parent_id: parent.id, updated_at: new Date().toISOString() })
-				.eq('id', c.id)
-				.eq('organization_id', organization.id);
-			if (moveErr) {
-				console.error('dissolveHierarchyNode promotion error:', moveErr);
+			try {
+				await sql`
+					update org_hierarchy_nodes
+					set parent_id = ${parent.id}, updated_at = now()
+					where id = ${c.id} and organization_id = ${organization.id}
+				`;
+			} catch (err) {
+				console.error('dissolveHierarchyNode promotion error:', err);
 				return fail(500, { error: 'error.generic' });
 			}
 		}
 
-		const { error: deleteErr } = await db
-			.from('org_hierarchy_nodes')
-			.delete()
-			.eq('id', nodeId)
-			.eq('organization_id', organization.id);
-		if (deleteErr) {
-			console.error('dissolveHierarchyNode delete error:', deleteErr);
+		try {
+			await sql`
+				delete from org_hierarchy_nodes
+				where id = ${nodeId} and organization_id = ${organization.id}
+			`;
+		} catch (err) {
+			console.error('dissolveHierarchyNode delete error:', err);
 			return fail(500, { error: 'error.generic' });
 		}
 
@@ -1609,20 +1572,13 @@ export const actions: Actions = {
 	restoreHierarchyNode: async ({ request, locals }) => {
 		if (!locals.user) return fail(403, { error: 'error.generic' });
 
-		const { data: memberships } = await db
-			.from('org_members')
-			.select('*, organizations(*)')
-			.eq('user_id', locals.user.id)
-			.is('removed_at', null)
-			.limit(1);
-
-		const m = memberships?.[0];
-		if (!m?.organizations) return fail(403, { error: 'error.generic' });
-		const organization = m.organizations;
-		const r = m.role as OrgRole;
+		const ctx = await loadCallerMembership(locals.user.id);
+		if (!ctx) return fail(403, { error: 'error.generic' });
+		const r = ctx.role as OrgRole;
 		if (r !== 'owner' && r !== 'system_admin' && r !== 'hr_admin') {
 			return fail(403, { error: 'error.generic' });
 		}
+		const organization = ctx.organization;
 
 		const fd = await request.formData();
 		const rawNode = fd.get('node')?.toString();
@@ -1654,23 +1610,19 @@ export const actions: Actions = {
 		}
 
 		// Don't clobber an existing row.
-		const { data: existing } = await db
-			.from('org_hierarchy_nodes')
-			.select('id')
-			.eq('id', node.id)
-			.eq('organization_id', organization.id)
-			.maybeSingle();
+		const existing = await maybeOne<{ id: string }>(sql`
+			select id from org_hierarchy_nodes
+			where id = ${node.id} and organization_id = ${organization.id}
+		`);
 		if (existing) return fail(400, { error: 'hierarchy.restore_id_exists' });
 
 		// Parent containment re-validation.
 		let parentType: HierarchyNodeType | null = null;
 		if (node.parent_id) {
-			const { data: parent } = await db
-				.from('org_hierarchy_nodes')
-				.select('node_type, organization_id')
-				.eq('id', node.parent_id)
-				.eq('organization_id', organization.id)
-				.maybeSingle();
+			const parent = await maybeOne<{ node_type: string }>(sql`
+				select node_type from org_hierarchy_nodes
+				where id = ${node.parent_id} and organization_id = ${organization.id}
+			`);
 			if (!parent) return fail(400, { error: 'hierarchy.parent_not_found' });
 			parentType = parent.node_type as HierarchyNodeType;
 		}
@@ -1680,12 +1632,11 @@ export const actions: Actions = {
 
 		// Children-to-reparent must still be valid under this node's type.
 		if (childIds.length > 0) {
-			const { data: childRows } = await db
-				.from('org_hierarchy_nodes')
-				.select('id, node_type')
-				.in('id', childIds)
-				.eq('organization_id', organization.id);
-			for (const c of childRows ?? []) {
+			const childRows = await many<{ id: string; node_type: string }>(sql`
+				select id, node_type from org_hierarchy_nodes
+				where id in ${sql(childIds)} and organization_id = ${organization.id}
+			`);
+			for (const c of childRows) {
 				if (!validateContainment(c.node_type as HierarchyNodeType, node.node_type)) {
 					return fail(400, { error: 'hierarchy.invalid_containment' });
 				}
@@ -1694,34 +1645,35 @@ export const actions: Actions = {
 
 		// Re-insert with the original id preserved so any remaining
 		// references still resolve.
-		const { error: insertErr } = await db.from('org_hierarchy_nodes').insert({
-			id: node.id,
-			organization_id: organization.id,
-			parent_id: node.parent_id,
-			node_type: node.node_type,
-			name: node.name,
-			title: node.title,
-			description: node.description,
-			user_id: node.user_id,
-			position_x: node.position_x ?? 0,
-			position_y: node.position_y ?? 0,
-			sort_order: node.sort_order ?? 0,
-			created_by: locals.user.id
-		});
-		if (insertErr) {
-			console.error('restoreHierarchyNode insert error:', insertErr);
+		const positionX = node.position_x ?? 0;
+		const positionY = node.position_y ?? 0;
+		const sortOrder = node.sort_order ?? 0;
+		try {
+			await sql`
+				insert into org_hierarchy_nodes (
+					id, organization_id, parent_id, node_type, name, title, description,
+					user_id, position_x, position_y, sort_order, created_by
+				) values (
+					${node.id}, ${organization.id}, ${node.parent_id}, ${node.node_type},
+					${node.name}, ${node.title}, ${node.description}, ${node.user_id},
+					${positionX}, ${positionY}, ${sortOrder}, ${locals.user.id}
+				)
+			`;
+		} catch (err) {
+			console.error('restoreHierarchyNode insert error:', err);
 			return fail(500, { error: 'error.generic' });
 		}
 
 		// Pull the specified children back under the restored node.
 		if (childIds.length > 0) {
-			const { error: reparentErr } = await db
-				.from('org_hierarchy_nodes')
-				.update({ parent_id: node.id, updated_at: new Date().toISOString() })
-				.in('id', childIds)
-				.eq('organization_id', organization.id);
-			if (reparentErr) {
-				console.error('restoreHierarchyNode child-reparent error:', reparentErr);
+			try {
+				await sql`
+					update org_hierarchy_nodes
+					set parent_id = ${node.id}, updated_at = now()
+					where id in ${sql(childIds)} and organization_id = ${organization.id}
+				`;
+			} catch (err) {
+				console.error('restoreHierarchyNode child-reparent error:', err);
 				return fail(500, { error: 'error.generic' });
 			}
 		}
@@ -1752,20 +1704,13 @@ export const actions: Actions = {
 	bulkCreateHierarchyNodes: async ({ request, locals }) => {
 		if (!locals.user) return fail(403, { error: 'error.generic' });
 
-		const { data: memberships } = await db
-			.from('org_members')
-			.select('*, organizations(*)')
-			.eq('user_id', locals.user.id)
-			.is('removed_at', null)
-			.limit(1);
-
-		const m = memberships?.[0];
-		if (!m?.organizations) return fail(403, { error: 'error.generic' });
-		const organization = m.organizations;
-		const r = m.role as OrgRole;
+		const ctx = await loadCallerMembership(locals.user.id);
+		if (!ctx) return fail(403, { error: 'error.generic' });
+		const r = ctx.role as OrgRole;
 		if (r !== 'owner' && r !== 'system_admin' && r !== 'hr_admin') {
 			return fail(403, { error: 'error.generic' });
 		}
+		const organization = ctx.organization;
 
 		const fd = await request.formData();
 		const payloadRaw = fd.get('payload')?.toString();
@@ -1790,13 +1735,13 @@ export const actions: Actions = {
 
 		const validTypes = ['executive_leader', 'department', 'team', 'individual'];
 
-		const { data: existingNodes } = await db
-			.from('org_hierarchy_nodes')
-			.select('id, name, node_type')
-			.eq('organization_id', organization.id);
+		const existingNodes = await many<{ id: string; name: string; node_type: string }>(sql`
+			select id, name, node_type from org_hierarchy_nodes
+			where organization_id = ${organization.id}
+		`);
 
 		const nameMap = new Map<string, { id: string; nodeType: HierarchyNodeType }>();
-		for (const n of existingNodes ?? []) {
+		for (const n of existingNodes) {
 			nameMap.set(n.name.toLowerCase().trim(), {
 				id: n.id,
 				nodeType: n.node_type as HierarchyNodeType
@@ -1831,37 +1776,36 @@ export const actions: Actions = {
 				continue;
 			}
 
-			let siblingQuery = db
-				.from('org_hierarchy_nodes')
-				.select('sort_order')
-				.eq('organization_id', organization.id);
-			siblingQuery = parentId
-				? siblingQuery.eq('parent_id', parentId)
-				: siblingQuery.is('parent_id', null);
-			const { data: siblings } = await siblingQuery;
+			const siblings = parentId
+				? await many<{ sort_order: number | null }>(sql`
+						select sort_order from org_hierarchy_nodes
+						where organization_id = ${organization.id} and parent_id = ${parentId}
+					`)
+				: await many<{ sort_order: number | null }>(sql`
+						select sort_order from org_hierarchy_nodes
+						where organization_id = ${organization.id} and parent_id is null
+					`);
 
 			const nextSort =
-				((siblings ?? []).reduce(
-					(max: number, s: { sort_order: number | null }) => Math.max(max, s.sort_order ?? 0),
-					-1
-				) as number) + 1;
+				siblings.reduce((max, s) => Math.max(max, s.sort_order ?? 0), -1) + 1;
 
-			const { data: inserted, error: insertError } = await db
-				.from('org_hierarchy_nodes')
-				.insert({
-					organization_id: organization.id,
-					parent_id: parentId,
-					node_type: row.nodeType as HierarchyNodeType,
-					name: row.name.trim(),
-					title: row.title?.trim() || null,
-					description: row.description?.trim() || null,
-					sort_order: nextSort,
-					created_by: locals.user.id
-				})
-				.select('id, node_type, name')
-				.single();
+			const trimmedName = row.name.trim();
+			const titleOrNull = row.title?.trim() || null;
+			const descriptionOrNull = row.description?.trim() || null;
 
-			if (insertError || !inserted) {
+			let inserted: { id: string; node_type: string; name: string };
+			try {
+				inserted = await one<{ id: string; node_type: string; name: string }>(sql`
+					insert into org_hierarchy_nodes (
+						organization_id, parent_id, node_type, name, title, description,
+						sort_order, created_by
+					) values (
+						${organization.id}, ${parentId}, ${row.nodeType}, ${trimmedName},
+						${titleOrNull}, ${descriptionOrNull}, ${nextSort}, ${locals.user.id}
+					)
+					returning id, node_type, name
+				`);
+			} catch {
 				failureCount++;
 				continue;
 			}
