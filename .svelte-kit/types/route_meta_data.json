@@ -6,21 +6,6 @@
 		"src/routes/+layout.ts",
 		"src/routes/+layout.server.ts"
 	],
-	"/api/download": [
-		"src/routes/api/download/+server.ts"
-	],
-	"/api/export/admin-nodes": [
-		"src/routes/api/export/admin-nodes/+server.ts"
-	],
-	"/api/export/goals-pdf": [
-		"src/routes/api/export/goals-pdf/+server.ts"
-	],
-	"/api/export/performance-logs": [
-		"src/routes/api/export/performance-logs/+server.ts"
-	],
-	"/api/export/snapshots": [
-		"src/routes/api/export/snapshots/+server.ts"
-	],
 	"/app": [
 		"src/routes/app/+page.server.ts",
 		"src/routes/app/+layout.server.ts",
@@ -144,9 +129,6 @@
 		"src/routes/+layout.ts",
 		"src/routes/+layout.server.ts"
 	],
-	"/auth/callback": [
-		"src/routes/auth/callback/+server.ts"
-	],
 	"/auth/forgot-password": [
 		"src/routes/auth/forgot-password/+page.server.ts",
 		"src/routes/+layout.ts",
@@ -184,15 +166,5 @@
 	],
 	"/favicon.ico": [
 		"src/routes/favicon.ico/+server.ts"
-	],
-	"/login": [
-		"src/routes/login/+page.server.ts",
-		"src/routes/+layout.ts",
-		"src/routes/+layout.server.ts"
-	],
-	"/platform": [
-		"src/routes/platform/+page.server.ts",
-		"src/routes/+layout.ts",
-		"src/routes/+layout.server.ts"
 	]
 }

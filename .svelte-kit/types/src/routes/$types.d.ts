@@ -12,7 +12,7 @@ type OptionalUnion<U extends Record<string, any>, A extends keyof U = U extends 
 export type Snapshot<T = any> = Kit.Snapshot<T>;
 type PageServerParentData = EnsureDefined<LayoutServerData>;
 type PageParentData = EnsureDefined<LayoutData>;
-type LayoutRouteId = RouteId | "/" | "/app" | "/app/admin" | "/app/admin/audit" | "/app/goals" | "/app/inquiries" | "/app/inquiries/[id]" | "/app/inquiries/new" | "/app/leaders" | "/app/leaders/[id]" | "/app/onboarding" | "/app/peers" | "/app/performance" | "/app/reports" | "/app/settings" | "/app/settings/audit-log" | "/app/setup" | "/app/stack" | "/app/team" | "/app/visibility" | "/auth/forgot-password" | "/auth/login" | "/auth/logout" | "/auth/register" | "/auth/reset-password" | "/auth/verify-email" | "/auth/verify-email/resend" | "/login" | "/platform" | null
+type LayoutRouteId = RouteId | "/" | "/app" | "/app/admin" | "/app/admin/audit" | "/app/goals" | "/app/inquiries" | "/app/inquiries/[id]" | "/app/inquiries/new" | "/app/leaders" | "/app/leaders/[id]" | "/app/onboarding" | "/app/peers" | "/app/performance" | "/app/reports" | "/app/settings" | "/app/settings/audit-log" | "/app/setup" | "/app/stack" | "/app/team" | "/app/visibility" | "/auth/forgot-password" | "/auth/login" | "/auth/logout" | "/auth/register" | "/auth/reset-password" | "/auth/verify-email" | "/auth/verify-email/resend" | null
 type LayoutParams = RouteParams & { id?: string }
 type LayoutServerParentData = EnsureDefined<{}>;
 type LayoutParentData = EnsureDefined<{}>;

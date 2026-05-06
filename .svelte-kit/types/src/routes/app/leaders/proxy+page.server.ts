@@ -18,10 +18,9 @@
 
 import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types.js';
-import { db } from '$lib/server/db.js';
+import { sql, many } from '$lib/server/db.js';
 import type { TierLevel } from '$lib/types/index.js';
 
-/** Shape of a node in the hierarchy tree */
 interface HierarchyNode {
 	id: string;
 	name: string;
@@ -34,7 +33,6 @@ interface HierarchyNode {
 	children: HierarchyNode[];
 }
 
-/** Shape of a peer node (flat, no children) */
 interface PeerNode {
 	id: string;
 	name: string;
@@ -45,37 +43,52 @@ interface PeerNode {
 	compositeTier: TierLevel | null;
 }
 
+interface OrgNodeRow {
+	id: string;
+	name: string;
+	title: string | null;
+	node_type: string;
+	parent_id: string | null;
+	user_id: string | null;
+	user_name: string | null;
+}
+
 export const load = async ({ parent }: Parameters<PageServerLoad>[0]) => {
 	const { organization, userNode } = await parent();
 
-	// Redirect if the user has no hierarchy node
 	if (!userNode) {
 		redirect(302, '/app');
 	}
 
-	// Fetch all nodes, all latest snapshots, and all metrics for the org in parallel.
-	// Fan-out batching avoids per-node N+1 queries when building the tree below.
-	const [allNodesRes, allSnapshotsRes, allMetricsRes] = await Promise.all([
-		db
-			.from('org_hierarchy_nodes')
-			.select('*, users!org_hierarchy_nodes_user_id_fkey(name)')
-			.eq('organization_id', organization.id),
-		db
-			.from('score_snapshots')
-			.select('node_id, composite_score, composite_tier, created_at')
-			.order('created_at', { ascending: false }),
-		db.from('metrics').select('node_id, approved_at')
+	const [allNodes, allSnapshots, allMetrics] = await Promise.all([
+		many<OrgNodeRow>(sql`
+			select
+				n.id, n.name, n.title, n.node_type, n.parent_id, n.user_id,
+				u.name as user_name
+			from org_hierarchy_nodes n
+			left join users u on u.id = n.user_id
+			where n.organization_id = ${organization.id}
+		`),
+		many<{
+			node_id: string;
+			composite_score: number | null;
+			composite_tier: string | null;
+			created_at: string;
+		}>(sql`
+			select node_id, composite_score, composite_tier, created_at
+			from score_snapshots
+			order by created_at desc
+		`),
+		many<{ node_id: string | null; approved_at: string | null }>(sql`
+			select node_id, approved_at from metrics
+		`)
 	]);
 
-	const allNodes = allNodesRes.data ?? [];
-
-	// Build a "latest snapshot per node" lookup. Results are already sorted
-	// newest-first, so the first occurrence wins.
 	const latestSnapshotByNode = new Map<
 		string,
 		{ composite_score: number | null; composite_tier: string | null }
 	>();
-	for (const snap of allSnapshotsRes.data ?? []) {
+	for (const snap of allSnapshots) {
 		if (!latestSnapshotByNode.has(snap.node_id)) {
 			latestSnapshotByNode.set(snap.node_id, {
 				composite_score: snap.composite_score,
@@ -84,24 +97,20 @@ export const load = async ({ parent }: Parameters<PageServerLoad>[0]) => {
 		}
 	}
 
-	// Aggregate metric counts per node in a single pass.
 	const metricCountsByNode = new Map<string, { total: number; approved: number }>();
-	for (const metric of allMetricsRes.data ?? []) {
+	for (const metric of allMetrics) {
+		if (!metric.node_id) continue;
 		const entry = metricCountsByNode.get(metric.node_id) ?? { total: 0, approved: 0 };
 		entry.total += 1;
 		if (metric.approved_at) entry.approved += 1;
 		metricCountsByNode.set(metric.node_id, entry);
 	}
 
-	/**
-	 * Recursively build a tree starting from children of `parentId`.
-	 */
 	const buildTree = (parentId: string): HierarchyNode[] => {
 		return allNodes
 			.filter((n) => n.parent_id === parentId)
 			.map((node) => {
 				const latest = latestSnapshotByNode.get(node.id) ?? null;
-				const userData = node.users as { name: string } | null;
 
 				return {
 					id: node.id,
@@ -109,7 +118,7 @@ export const load = async ({ parent }: Parameters<PageServerLoad>[0]) => {
 					title: node.title,
 					nodeType: node.node_type,
 					userId: node.user_id,
-					userName: userData?.name ?? null,
+					userName: node.user_name,
 					compositeScore: latest?.composite_score ?? null,
 					compositeTier: (latest?.composite_tier as TierLevel | null) ?? null,
 					children: buildTree(node.id)
@@ -119,11 +128,8 @@ export const load = async ({ parent }: Parameters<PageServerLoad>[0]) => {
 
 	const subtree = buildTree(userNode.id);
 
-	// ── Team Health Summary ─────────────────────────────────────────────────
-	// For each direct report: name, current tier, metric completion status
 	const directChildren = allNodes.filter((n) => n.parent_id === userNode.id);
 	const teamHealth = directChildren.map((child) => {
-		const userData = child.users as { name: string } | null;
 		const latest = latestSnapshotByNode.get(child.id) ?? null;
 		const counts = metricCountsByNode.get(child.id) ?? { total: 0, approved: 0 };
 
@@ -131,7 +137,7 @@ export const load = async ({ parent }: Parameters<PageServerLoad>[0]) => {
 			id: child.id,
 			name: child.name,
 			title: child.title,
-			userName: userData?.name ?? null,
+			userName: child.user_name,
 			currentTier: (latest?.composite_tier as TierLevel) ?? null,
 			currentScore: latest?.composite_score ?? null,
 			totalMetrics: counts.total,
@@ -139,7 +145,6 @@ export const load = async ({ parent }: Parameters<PageServerLoad>[0]) => {
 		};
 	});
 
-	/** Flatten the tree for list-view rendering */
 	const flattenHierarchy = (
 		nodes: HierarchyNode[],
 		depth = 0
@@ -150,7 +155,6 @@ export const load = async ({ parent }: Parameters<PageServerLoad>[0]) => {
 		]);
 	};
 
-	// ── Peers: same parent, excluding self ───────────────────────────────────
 	const currentNodeRecord = allNodes.find((n) => n.id === userNode.id);
 	let peers: PeerNode[] = [];
 
@@ -161,14 +165,12 @@ export const load = async ({ parent }: Parameters<PageServerLoad>[0]) => {
 
 		peers = peerNodes.map((node) => {
 			const latest = latestSnapshotByNode.get(node.id) ?? null;
-			const userData = node.users as { name: string } | null;
-
 			return {
 				id: node.id,
 				name: node.name,
 				title: node.title,
 				nodeType: node.node_type,
-				userName: userData?.name ?? null,
+				userName: node.user_name,
 				compositeScore: latest?.composite_score ?? null,
 				compositeTier: (latest?.composite_tier as TierLevel | null) ?? null
 			};

@@ -16,7 +16,8 @@
 
 import { redirect, fail } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types.js';
-import { db } from '$lib/server/db.js';
+import postgres from 'postgres';
+import { sql, many, maybeOne } from '$lib/server/db.js';
 import { verifyManagementAccess } from '$lib/server/permissions.js';
 import {
 	calculateCompositeScore,
@@ -25,7 +26,6 @@ import {
 } from '$lib/utils/score.js';
 import type { TierLevel } from '$lib/types/index.js';
 
-/** Shape of a team member node in the subtree */
 interface TeamNode {
 	id: string;
 	name: string;
@@ -40,7 +40,6 @@ interface TeamNode {
 	metricApproved: number;
 }
 
-/** Health summary for a direct report */
 interface DirectReportHealth {
 	id: string;
 	name: string;
@@ -52,6 +51,21 @@ interface DirectReportHealth {
 	metricApproved: number;
 }
 
+interface AllNode {
+	id: string;
+	name: string;
+	title: string | null;
+	node_type: string;
+	parent_id: string | null;
+}
+
+interface SnapshotRow {
+	node_id: string;
+	composite_tier: string | null;
+	composite_score: number | null;
+	created_at: string;
+}
+
 export const load = async ({ parent }: Parameters<PageServerLoad>[0]) => {
 	const { organization, userNode, hasDirectReports, isSystemAdmin } = await parent();
 
@@ -59,19 +73,18 @@ export const load = async ({ parent }: Parameters<PageServerLoad>[0]) => {
 		redirect(302, '/app');
 	}
 
-	// ── Fetch all nodes in the org for tree-building ──────────────────────
-	const { data: allNodes } = await db
-		.from('org_hierarchy_nodes')
-		.select('*')
-		.eq('organization_id', organization.id);
+	const allNodes = await many<AllNode>(sql`
+		select id, name, title, node_type, parent_id
+		from org_hierarchy_nodes
+		where organization_id = ${organization.id}
+	`);
 
-	if (!allNodes) {
+	if (allNodes.length === 0) {
 		return { subtree: [], directReportHealth: [], peers: [] };
 	}
 
-	// ── Build subtree by walking descendants ─────────────────────────────
 	const nodeMap = new Map(allNodes.map((n) => [n.id, n]));
-	const childrenMap = new Map<string, typeof allNodes>();
+	const childrenMap = new Map<string, AllNode[]>();
 	for (const node of allNodes) {
 		if (node.parent_id) {
 			const siblings = childrenMap.get(node.parent_id) ?? [];
@@ -80,7 +93,6 @@ export const load = async ({ parent }: Parameters<PageServerLoad>[0]) => {
 		}
 	}
 
-	/** Collect descendant node IDs with depth */
 	const descendantEntries: { id: string; depth: number }[] = [];
 	const queue: { id: string; depth: number }[] = [{ id: userNode.id, depth: 0 }];
 	while (queue.length > 0) {
@@ -92,7 +104,6 @@ export const load = async ({ parent }: Parameters<PageServerLoad>[0]) => {
 		}
 	}
 
-	// ── Fetch snapshots and metric counts for all descendants in parallel ─
 	const descendantIds = descendantEntries.map((e) => e.id);
 
 	const snapshotByNode = new Map<
@@ -102,23 +113,26 @@ export const load = async ({ parent }: Parameters<PageServerLoad>[0]) => {
 	const metricCountByNode = new Map<string, { total: number; approved: number }>();
 
 	if (descendantIds.length > 0) {
-		const [{ data: snapshots }, { data: metrics }] = await Promise.all([
-			db
-				.from('score_snapshots')
-				.select('node_id, composite_tier, composite_score, created_at')
-				.in('node_id', descendantIds)
-				.order('created_at', { ascending: false }),
-			db.from('metrics').select('node_id, approved_at').in('node_id', descendantIds)
+		const [snapshots, metrics] = await Promise.all([
+			many<SnapshotRow>(sql`
+				select node_id, composite_tier, composite_score, created_at
+				from score_snapshots
+				where node_id = any(${descendantIds}::uuid[])
+				order by created_at desc
+			`),
+			many<{ node_id: string | null; approved_at: string | null }>(sql`
+				select node_id, approved_at from metrics
+				where node_id = any(${descendantIds}::uuid[])
+			`)
 		]);
 
-		for (const snap of snapshots ?? []) {
-			// Keep only the latest per node
+		for (const snap of snapshots) {
 			if (!snapshotByNode.has(snap.node_id)) {
 				snapshotByNode.set(snap.node_id, snap);
 			}
 		}
 
-		for (const m of metrics ?? []) {
+		for (const m of metrics) {
 			if (!m.node_id) continue;
 			const entry = metricCountByNode.get(m.node_id) ?? { total: 0, approved: 0 };
 			entry.total++;
@@ -127,7 +141,6 @@ export const load = async ({ parent }: Parameters<PageServerLoad>[0]) => {
 		}
 	}
 
-	// ── Build subtree array ─────────────────────────────────────────────
 	const subtree: TeamNode[] = descendantEntries.map((entry) => {
 		const node = nodeMap.get(entry.id)!;
 		const snap = snapshotByNode.get(entry.id);
@@ -148,7 +161,6 @@ export const load = async ({ parent }: Parameters<PageServerLoad>[0]) => {
 		};
 	});
 
-	// ── Direct report health summary (depth-1 children only) ────────────
 	const directReportHealth: DirectReportHealth[] = subtree
 		.filter((n) => n.depth === 1)
 		.map((n) => ({
@@ -162,7 +174,6 @@ export const load = async ({ parent }: Parameters<PageServerLoad>[0]) => {
 			metricApproved: n.metricApproved
 		}));
 
-	// ── Peers (siblings under same parent) ──────────────────────────────
 	const currentNode = nodeMap.get(userNode.id);
 	const peers =
 		currentNode?.parent_id && !isSystemAdmin
@@ -184,13 +195,6 @@ export const load = async ({ parent }: Parameters<PageServerLoad>[0]) => {
 };
 
 export const actions = {
-	/**
-	 * Capture a snapshot for a specific direct report node.
-	 *
-	 * Allows directors and other leaders to capture individual node snapshots
-	 * from the team overview page without navigating to each leader detail page.
-	 * Uses the same ancestry-based permission check as the leaders detail page.
-	 */
 	captureSnapshot: async ({ request, locals }: import('./$types').RequestEvent) => {
 		if (!locals.user) return fail(403, { error: 'error.generic' });
 
@@ -204,13 +208,21 @@ export const actions = {
 		const mgr = await verifyManagementAccess(locals.user.id, nodeId);
 		if (!mgr) return fail(403, { error: 'error.generic' });
 
-		// Load all metrics for the target node
-		const { data: nodeMetrics } = await db
-			.from('metrics')
-			.select('id, name, measurement_type, origin, current_value, current_tier, weight')
-			.eq('node_id', nodeId);
+		const nodeMetrics = await many<{
+			id: string;
+			name: string;
+			measurement_type: string;
+			origin: string;
+			current_value: unknown;
+			current_tier: TierLevel | null;
+			weight: number | null;
+		}>(sql`
+			select id, name, measurement_type, origin, current_value, current_tier, weight
+			from metrics
+			where node_id = ${nodeId}
+		`);
 
-		const scoreable = (nodeMetrics ?? []).filter((m) => m.current_tier && m.weight);
+		const scoreable = nodeMetrics.filter((m) => m.current_tier && m.weight);
 
 		if (scoreable.length === 0) {
 			return fail(400, { error: 'snapshot.no_scoreable_metrics' });
@@ -236,31 +248,30 @@ export const actions = {
 			}))
 		);
 
-		const { data: snapshot, error: snapErr } = await db
-			.from('score_snapshots')
-			.insert({
-				organization_id: mgr.organizationId,
-				node_id: nodeId,
-				composite_score: compositeScore,
-				composite_tier: compositeTier,
-				metric_details: metricDetails as unknown as Record<string, unknown>,
-				cycle_label: cycleLabel,
-				notes,
-				recorded_by: locals.user.id
-			})
-			.select()
-			.single();
+		const snapshot = await maybeOne<{ id: string }>(sql`
+			insert into score_snapshots
+				(organization_id, node_id, composite_score, composite_tier,
+				 metric_details, cycle_label, notes, recorded_by)
+			values (
+				${mgr.organizationId},
+				${nodeId},
+				${compositeScore},
+				${compositeTier},
+				${sql.json(metricDetails as unknown as postgres.JSONValue)},
+				${cycleLabel},
+				${notes},
+				${locals.user.id}
+			)
+			returning id
+		`);
 
-		if (snapErr || !snapshot) return fail(500, { error: 'error.generic' });
+		if (!snapshot) return fail(500, { error: 'error.generic' });
 
-		// Lock all metrics on this node
-		await db
-			.from('metrics')
-			.update({
-				locked_by_snapshot_id: snapshot.id,
-				updated_at: new Date().toISOString()
-			})
-			.eq('node_id', nodeId);
+		await sql`
+			update metrics
+			set locked_by_snapshot_id = ${snapshot.id}, updated_at = now()
+			where node_id = ${nodeId}
+		`;
 
 		return { snapshotSuccess: true, snapshotId: snapshot.id };
 	}

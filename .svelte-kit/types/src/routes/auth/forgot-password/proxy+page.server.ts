@@ -2,22 +2,22 @@
 /**
  * Forgot Password Page Server
  *
- * Sends a password reset email via Supabase Auth.
- * Always shows a success response to prevent email enumeration.
+ * POST issues a password reset token (logged for now, emailed in Phase 4).
+ * Always returns success to avoid leaking whether an account exists.
  */
 
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types.js';
-import { createSupabaseServerClient } from '$lib/server/supabase.js';
+import { sql, maybeOne } from '$lib/server/db.js';
+import { createPasswordResetToken } from '$lib/server/auth/index.js';
 import { env as pubEnv } from '$env/dynamic/public';
 
 export const load = async ({ url }: Parameters<PageServerLoad>[0]) => {
-	// Canonical forgot-password page is now /web/forgot-password
-	redirect(302, `/web/forgot-password${url.search}`);
+	redirect(302, `/auth/login${url.search}`);
 };
 
 export const actions = {
-	default: async ({ request, cookies }: import('./$types').RequestEvent) => {
+	default: async ({ request }: import('./$types').RequestEvent) => {
 		const formData = await request.formData();
 		const email = formData.get('email')?.toString().trim().toLowerCase();
 
@@ -30,20 +30,18 @@ export const actions = {
 			return fail(400, { error: 'validation.email_invalid', email });
 		}
 
-		const supabase = createSupabaseServerClient(cookies);
+		const user = await maybeOne<{ id: string }>(sql`
+			select id from users where email = ${email} and deactivated_at is null
+		`);
 
-		// `redirectTo` is the final destination after the /auth/callback
-		// endpoint has verified the token and established a session. The
-		// recovery email template (supabase/templates/recovery.html) wraps
-		// this value into the callback URL's `next` query param — do not
-		// point it at `/auth/callback` directly, or the callback will try
-		// to redirect the user to itself.
-		await supabase.auth.resetPasswordForEmail(email, {
-			redirectTo: `${pubEnv.PUBLIC_APP_URL}/auth/reset-password`
-		});
+		if (user) {
+			const token = await createPasswordResetToken(user.id);
+			const resetUrl = `${pubEnv.PUBLIC_APP_URL ?? ''}/auth/reset-password?token=${token}`;
+			// TODO Phase 4: actually send the email when configured.
+			console.log(`[forgot-password] reset link for ${email}: ${resetUrl}`);
+		}
 
-		// Always return success - Supabase silently ignores unknown emails,
-		// so we don't leak whether an account exists.
+		// Always return success.
 		return { success: true };
 	}
 };

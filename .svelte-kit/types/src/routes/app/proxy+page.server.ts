@@ -7,15 +7,13 @@
 
 import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types.js';
-import { db } from '$lib/server/db.js';
+import { sql, many, maybeOne } from '$lib/server/db.js';
 import { calculateCompositeScore, getTierFromScore } from '$lib/utils/score.js';
 import { TIER_VALUES } from '$lib/config/theme.js';
 import type { TierLevel } from '$lib/types/index.js';
 
-/** Tier-to-number map for sparkline values */
 const TIER_VALUES_MAP: Record<TierLevel, number> = TIER_VALUES;
 
-/** Shape of an active goal shown on the dashboard */
 interface DashboardGoal {
 	id: string;
 	title: string;
@@ -26,15 +24,36 @@ interface DashboardGoal {
 	dueDate: string | null;
 }
 
+interface MetricRow {
+	id: string;
+	name: string;
+	weight: number | null;
+	current_tier: TierLevel | null;
+	current_value: unknown;
+	measurement_type: string | null;
+}
+
+interface SnapshotRow {
+	id: string;
+	composite_score: number;
+	composite_tier: string;
+	cycle_label: string | null;
+	created_at: string;
+}
+
+interface ChildNode {
+	id: string;
+	name: string;
+	title: string | null;
+}
+
 export const load = async ({ parent }: Parameters<PageServerLoad>[0]) => {
 	const { userNode, isSystemAdmin, isHrAdmin } = await parent();
 
-	// System admins and HR admins without a node get redirected to admin
 	if (!userNode && (isSystemAdmin || isHrAdmin)) {
 		redirect(302, '/app/admin');
 	}
 
-	// Unplaced users get the onboarding dashboard (handled in +page.svelte)
 	if (!userNode) {
 		return {
 			needsPlacement: true,
@@ -48,38 +67,26 @@ export const load = async ({ parent }: Parameters<PageServerLoad>[0]) => {
 		};
 	}
 
-	// Get metrics for the user's node (or all if no node)
-	const nodeId = userNode?.id;
+	const nodeId = userNode.id;
 
-	let userMetrics: {
-		id: string;
-		name: string;
-		weight: number | null;
-		current_tier: TierLevel | null;
-		current_value: unknown;
-		measurement_type: string | null;
-	}[] = [];
-	if (nodeId) {
-		const { data } = await db
-			.from('metrics')
-			.select('*')
-			.eq('node_id', nodeId)
-			.order('weight', { ascending: false, nullsFirst: false });
-		userMetrics = data ?? [];
-	}
+	const userMetrics = await many<MetricRow>(sql`
+		select id, name, weight, current_tier, current_value, measurement_type
+		from metrics
+		where node_id = ${nodeId}
+		order by weight desc nulls last
+	`);
 
-	// Fetch recent performance_log values per metric for sparklines
 	const metricSparklines: Record<string, number[]> = {};
 	if (userMetrics.length > 0) {
 		await Promise.all(
 			userMetrics.map(async (m) => {
-				const { data: logs } = await db
-					.from('performance_logs')
-					.select('assessed_tier')
-					.eq('metric_id', m.id)
-					.order('period_end', { ascending: false })
-					.limit(6);
-				if (logs?.length) {
+				const logs = await many<{ assessed_tier: string }>(sql`
+					select assessed_tier from performance_logs
+					where metric_id = ${m.id}
+					order by period_end desc
+					limit 6
+				`);
+				if (logs.length > 0) {
 					metricSparklines[m.id] = logs
 						.map((l) => TIER_VALUES_MAP[l.assessed_tier as TierLevel] ?? 3)
 						.reverse();
@@ -88,7 +95,6 @@ export const load = async ({ parent }: Parameters<PageServerLoad>[0]) => {
 		);
 	}
 
-	// Calculate composite score if metrics exist
 	let compositeScore = 0;
 	let compositeTier: TierLevel = 'content';
 
@@ -106,47 +112,40 @@ export const load = async ({ parent }: Parameters<PageServerLoad>[0]) => {
 		}
 	}
 
-	// Get recent score snapshots
-	let recentSnapshots: {
+	const recentSnapshots = await many<SnapshotRow>(sql`
+		select id, composite_score, composite_tier, cycle_label, created_at
+		from score_snapshots
+		where node_id = ${nodeId}
+		order by created_at desc
+		limit 6
+	`);
+
+	const goalRows = await many<{
 		id: string;
-		composite_score: number;
-		composite_tier: string;
-		cycle_label: string | null;
-		created_at: string;
-	}[] = [];
-	if (nodeId) {
-		const { data } = await db
-			.from('score_snapshots')
-			.select('*')
-			.eq('node_id', nodeId)
-			.order('created_at', { ascending: false })
-			.limit(6);
-		recentSnapshots = data ?? [];
-	}
+		title: string;
+		status: string;
+		priority: string | null;
+		goal_type: string | null;
+		target_tier: TierLevel | null;
+		due_date: string | null;
+	}>(sql`
+		select id, title, status, priority, goal_type, target_tier, due_date
+		from org_goals
+		where hierarchy_node_id = ${nodeId}
+			and status in ('in_progress', 'defined')
+		order by created_at desc
+		limit 5
+	`);
+	const activeGoals: DashboardGoal[] = goalRows.map((g) => ({
+		id: g.id,
+		title: g.title,
+		status: g.status,
+		priority: g.priority,
+		goalType: g.goal_type,
+		targetTier: g.target_tier,
+		dueDate: g.due_date
+	}));
 
-	// Load active goals for the dashboard panel (in-progress and defined, newest first)
-	let activeGoals: DashboardGoal[] = [];
-	if (nodeId) {
-		const { data: goalRows } = await db
-			.from('org_goals')
-			.select('id, title, status, priority, goal_type, target_tier, due_date')
-			.eq('hierarchy_node_id', nodeId)
-			.in('status', ['in_progress', 'defined'])
-			.order('created_at', { ascending: false })
-			.limit(5);
-		activeGoals = (goalRows ?? []).map((g) => ({
-			id: g.id,
-			title: g.title,
-			status: g.status,
-			priority: g.priority,
-			goalType: g.goal_type,
-			targetTier: g.target_tier as TierLevel | null,
-			dueDate: g.due_date
-		}));
-	}
-
-	// Get direct reports with recent score history for sparklines, and count
-	// metrics awaiting manager review across those same reports in one pass.
 	let pendingReviewCount = 0;
 	let directReports: {
 		id: string;
@@ -157,48 +156,49 @@ export const load = async ({ parent }: Parameters<PageServerLoad>[0]) => {
 		recentScores: number[];
 	}[] = [];
 
-	if (nodeId) {
-		const { data: childNodes } = await db
-			.from('org_hierarchy_nodes')
-			.select('*')
-			.eq('parent_id', nodeId);
+	const childNodes = await many<ChildNode>(sql`
+		select id, name, title from org_hierarchy_nodes where parent_id = ${nodeId}
+	`);
 
-		if (childNodes?.length) {
-			const childIds = childNodes.map((n) => n.id);
+	if (childNodes.length > 0) {
+		const childIds = childNodes.map((n) => n.id);
 
-			const [{ count }, reports] = await Promise.all([
-				db
-					.from('metrics')
-					.select('id', { count: 'exact', head: true })
-					.in('node_id', childIds)
-					.not('submitted_at', 'is', null)
-					.is('approved_at', null),
-				Promise.all(
-					childNodes.map(async (child) => {
-						const { data: snapshots } = await db
-							.from('score_snapshots')
-							.select('*')
-							.eq('node_id', child.id)
-							.order('created_at', { ascending: false })
-							.limit(4);
+		const [pendingRow, reports] = await Promise.all([
+			maybeOne<{ count: string }>(sql`
+				select count(*)::text as count from metrics
+				where node_id = any(${childIds}::uuid[])
+					and submitted_at is not null
+					and approved_at is null
+			`),
+			Promise.all(
+				childNodes.map(async (child) => {
+					const snapshots = await many<{
+						composite_score: number;
+						composite_tier: TierLevel;
+					}>(sql`
+						select composite_score, composite_tier
+						from score_snapshots
+						where node_id = ${child.id}
+						order by created_at desc
+						limit 4
+					`);
 
-						const latestSnapshot = snapshots?.[0] ?? null;
-						const recentScores = (snapshots ?? []).map((s) => s.composite_score).reverse();
-						return {
-							id: child.id,
-							name: child.name,
-							title: child.title,
-							compositeScore: latestSnapshot?.composite_score ?? null,
-							compositeTier: latestSnapshot?.composite_tier ?? null,
-							recentScores
-						};
-					})
-				)
-			]);
+					const latest = snapshots[0];
+					const recentScores = snapshots.map((s) => s.composite_score).reverse();
+					return {
+						id: child.id,
+						name: child.name,
+						title: child.title,
+						compositeScore: latest?.composite_score ?? null,
+						compositeTier: latest?.composite_tier ?? null,
+						recentScores
+					};
+				})
+			)
+		]);
 
-			pendingReviewCount = count ?? 0;
-			directReports = reports;
-		}
+		pendingReviewCount = Number(pendingRow?.count ?? 0);
+		directReports = reports;
 	}
 
 	return {

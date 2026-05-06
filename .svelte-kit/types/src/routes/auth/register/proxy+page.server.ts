@@ -2,31 +2,32 @@
 /**
  * Registration Page Server
  *
- * Creates a Supabase Auth account and an application profile row.
+ * Creates a user row with a scrypt-hashed password and issues a
+ * verification token. The user must verify their email before they can
+ * log in (unless email is not configured — see notes below).
  *
- * Two-step process:
- *   1. `supabase.auth.signUp()` - creates the auth identity and sends a
- *      confirmation email to the user.
- *   2. Insert a profile row into our `users` table keyed by the auth user ID.
- *      This row stores the display name, locale preference, and isAdmin flag.
+ * Phase 4 will add a proper /auth/register UI page; for now the GET load
+ * redirects back to /auth/login and the POST action is what gets used.
  *
- * The profile is created immediately (before email confirmation) so that
- * once the user clicks the confirmation link and lands in /app, their
- * profile is already in place.
+ * Email sending is currently a console log — Phase 4 wires up the
+ * postmark/SMTP-aware sender.
  */
 
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types.js';
-import { createSupabaseServerClient } from '$lib/server/supabase.js';
-import { db } from '$lib/server/db.js';
+import { sql, maybeOne } from '$lib/server/db.js';
+import {
+	hashPassword,
+	createSession,
+	setSessionCookie,
+	createVerificationToken,
+	validatePassword,
+	MIN_PASSWORD_LENGTH
+} from '$lib/server/auth/index.js';
 import { env as pubEnv } from '$env/dynamic/public';
 
-/** Minimum password length enforced client-side and here */
-const MIN_PASSWORD_LENGTH = 8;
-
 export const load = async ({ url }: Parameters<PageServerLoad>[0]) => {
-	// Canonical registration page is now /web/register
-	redirect(302, `/web/register${url.search}`);
+	redirect(302, `/auth/login${url.search}`);
 };
 
 export const actions = {
@@ -39,7 +40,6 @@ export const actions = {
 		const redirectTo =
 			formData.get('redirect')?.toString() || url.searchParams.get('redirect') || '/app';
 
-		// ---- Basic validation ----
 		if (!email || !password || !name) {
 			return fail(400, { error: 'validation.field_required', email, name });
 		}
@@ -49,8 +49,14 @@ export const actions = {
 			return fail(400, { error: 'validation.email_invalid', email, name });
 		}
 
-		if (password.length < MIN_PASSWORD_LENGTH) {
-			return fail(400, { error: 'validation.password_min', email, name });
+		const passwordCheck = validatePassword(password);
+		if (!passwordCheck.valid) {
+			return fail(400, {
+				error: 'validation.password_min',
+				email,
+				name,
+				minLength: MIN_PASSWORD_LENGTH
+			});
 		}
 
 		const complexityRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^a-zA-Z\d])/;
@@ -62,59 +68,45 @@ export const actions = {
 			return fail(400, { error: 'validation.password_match', email, name });
 		}
 
-		// ---- Create Supabase auth account ----
-		const supabase = createSupabaseServerClient(cookies);
-		const { data, error } = await supabase.auth.signUp({
-			email,
-			password,
-			options: {
-				// Final destination after the /auth/callback endpoint verifies
-				// the confirmation token. The confirmation email template
-				// (supabase/templates/confirmation.html) wraps this value into
-				// the callback URL's `next` query param.
-				emailRedirectTo: `${pubEnv.PUBLIC_APP_URL}${redirectTo}`,
-				data: { name }
-			}
-		});
+		const existing = await maybeOne<{ id: string }>(sql`
+			select id from users where email = ${email}
+		`);
 
-		if (error) {
-			// Log the real error for debugging; return generic message to prevent email enumeration
-			console.error('[register] supabase.auth.signUp error:', error.message, error.status);
-			return fail(400, { error: 'error.generic', email, name });
+		if (existing) {
+			// Don't leak whether an account exists. Pretend to succeed.
+			redirect(
+				302,
+				`/auth/verify-email?pending=true&email=${encodeURIComponent(email)}&redirect=${encodeURIComponent(redirectTo)}`
+			);
 		}
 
-		if (!data.user) {
-			console.error('[register] supabase.auth.signUp returned no user and no error');
+		const passwordHash = await hashPassword(password);
+
+		const inserted = await maybeOne<{ id: string }>(sql`
+			insert into users (email, password_hash, name, locale, email_verified, is_admin)
+			values (${email}, ${passwordHash}, ${name}, 'en', false, false)
+			returning id
+		`);
+
+		if (!inserted) {
+			console.error('[register] insert into users returned no row');
 			return fail(500, { error: 'error.generic', email, name });
 		}
 
-		// ---- Create application profile ----
-		// Check if a profile already exists (edge case: user re-registers)
-		try {
-			const { data: existing } = await db
-				.from('users')
-				.select('id')
-				.eq('id', data.user.id)
-				.single();
+		const verificationToken = await createVerificationToken(inserted.id);
+		const verificationUrl = `${pubEnv.PUBLIC_APP_URL ?? ''}/auth/verify-email?token=${verificationToken}&redirect=${encodeURIComponent(redirectTo)}`;
 
-			if (!existing) {
-				await db.from('users').insert({
-					id: data.user.id,
-					email,
-					password_hash: null, // Supabase manages the password
-					name,
-					locale: 'en',
-					email_verified: false,
-					is_admin: false
-				});
-			}
-		} catch (dbErr) {
-			// Auth account was created - profile creation failed. Log for ops visibility.
-			// User can still verify email; profile can be reconciled via admin if needed.
-			console.error('[register] profile creation error:', dbErr);
-		}
+		// TODO Phase 4: actually send the email via postmark/SMTP when
+		// POSTMARK_API_TOKEN or SMTP_URL is set. For now we log the link
+		// so customer-deployment operators can complete verification manually.
+		console.log(`[register] verification link for ${email}: ${verificationUrl}`);
 
-		// Redirect to the "check your email" page
+		// Auto-create a session so the new user is logged in. They still
+		// need to verify their email; gating happens at /auth/login on the
+		// next login attempt.
+		const sessionId = await createSession(inserted.id);
+		setSessionCookie(cookies, sessionId);
+
 		redirect(
 			302,
 			`/auth/verify-email?pending=true&email=${encodeURIComponent(email)}&redirect=${encodeURIComponent(redirectTo)}`
