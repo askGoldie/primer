@@ -10,7 +10,7 @@
  * and `hasDirectReports` flag that action handlers commonly branch on.
  */
 import { sql, maybeOne } from '$lib/server/db.js';
-import type { OrgRole } from '$lib/types/database.js';
+import type { OrgRole } from '$lib/types/index.js';
 
 export interface ActionContext {
 	organization: { id: string; name: string };

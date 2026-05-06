@@ -114,6 +114,12 @@ export type OrgMemberRole =
 	| 'viewer';
 
 /**
+ * Concise alias for {@link OrgMemberRole}. Used in permission helpers and
+ * route-level role checks that read more naturally as "the caller's OrgRole".
+ */
+export type OrgRole = OrgMemberRole;
+
+/**
  * Organization membership record
  */
 export interface OrgMember {

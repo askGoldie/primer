@@ -18,8 +18,13 @@
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types.js';
 import { sql, maybeOne, many, one } from '$lib/server/db.js';
-import type { TierLevel, GoalType, GoalPriority, GoalStatus } from '$lib/types/index.js';
-import type { GoalDependencyType } from '$lib/types/database.js';
+import type {
+	TierLevel,
+	GoalType,
+	GoalPriority,
+	GoalStatus,
+	GoalDependencyType
+} from '$lib/types/index.js';
 import { getDirectChildNodeIds } from '$lib/server/hierarchy.js';
 import { loadActionContext } from '$lib/server/action-context.js';
 

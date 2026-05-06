@@ -9,7 +9,7 @@ import { fail, redirect, error } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types.js';
 import { sql, maybeOne, many } from '$lib/server/db.js';
 import { canResolveAnyInquiry } from '$lib/server/permissions.js';
-import type { OrgRole } from '$lib/types/database.js';
+import type { OrgRole } from '$lib/types/index.js';
 import { t } from '$lib/i18n/index.js';
 
 interface InquiryRow {

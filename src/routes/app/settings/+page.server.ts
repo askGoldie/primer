@@ -128,8 +128,7 @@ import {
 	getTierFromScore,
 	calculateMetricDetails
 } from '$lib/utils/score.js';
-import type { TierLevel, HierarchyNodeType } from '$lib/types/index.js';
-import type { OrgRole } from '$lib/types/database.js';
+import type { TierLevel, HierarchyNodeType, OrgRole } from '$lib/types/index.js';
 import { validateContainment } from '$lib/hierarchy/containment.js';
 import { getHierarchyTemplate, type HierarchyTemplateNode } from '$lib/hierarchy/templates.js';
 

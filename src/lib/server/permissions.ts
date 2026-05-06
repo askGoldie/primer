@@ -26,7 +26,7 @@
  */
 
 import { sql, maybeOne } from '$lib/server/db.js';
-import type { OrgRole } from '$lib/types/database.js';
+import type { OrgRole } from '$lib/types/index.js';
 
 // ============================================================================
 // Role Checks

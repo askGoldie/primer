@@ -8,7 +8,7 @@
 import { redirect } from '@sveltejs/kit';
 import type { LayoutServerLoad } from './$types.js';
 import { sql, maybeOne, many } from '$lib/server/db.js';
-import type { OrgRole } from '$lib/types/database.js';
+import type { OrgRole } from '$lib/types/index.js';
 
 interface MembershipRow {
 	role: OrgRole;

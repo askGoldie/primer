@@ -12,7 +12,7 @@ import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types.js';
 import { sql, many, maybeOne } from '$lib/server/db.js';
 import { canExportComplianceReports } from '$lib/server/permissions.js';
-import type { OrgRole } from '$lib/types/database.js';
+import type { OrgRole } from '$lib/types/index.js';
 
 const PAGE_SIZE = 50;
 

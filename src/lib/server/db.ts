@@ -1,17 +1,14 @@
 /**
  * Server-side Database Client
  *
- * Exposes two clients during the Phase 2 Supabase → postgres-js migration:
+ * Exposes the postgres-js tagged-template client and three small helpers for
+ * the most common query shapes (single row, optional row, list). All
+ * server-side code should query through `sql` — the codebase intentionally
+ * does not wrap this in an ORM or query builder.
  *
- *   - `sql`  — the postgres-js tagged-template client. Use this for new code
- *              and as call sites are migrated. Returns plain row arrays.
- *
- *   - `db`   — the legacy typed Supabase admin client. Used by call sites
- *              that haven't been migrated yet. Will be removed at the end
- *              of Phase 2.
- *
- * In the final customer build, only `sql` (and the helpers below) remain;
- * `DATABASE_URL` is the sole DB env var.
+ * Configured from `DATABASE_URL` (required). Optional env:
+ *   - `DATABASE_POOL_MAX` — pool size, default 10
+ *   - `DATABASE_SSL`      — set to "require" for managed Postgres providers
  *
  * @example
  * ```ts
@@ -22,14 +19,7 @@
  */
 
 import postgres from 'postgres';
-import { createClient } from '@supabase/supabase-js';
 import { env } from '$env/dynamic/private';
-import { env as pubEnv } from '$env/dynamic/public';
-import type { Database } from '$lib/types/database.js';
-
-// ---------------------------------------------------------------------------
-// postgres-js — the target client for the customer build
-// ---------------------------------------------------------------------------
 
 if (!env.DATABASE_URL) {
 	throw new Error('DATABASE_URL must be set.');
@@ -76,25 +66,3 @@ export async function many<T>(query: postgres.PendingQuery<postgres.Row[]>): Pro
 	const rows = await query;
 	return rows as unknown as T[];
 }
-
-// ---------------------------------------------------------------------------
-// Supabase admin client — legacy, removed at the end of Phase 2
-// ---------------------------------------------------------------------------
-
-if (!pubEnv.PUBLIC_SUPABASE_URL) {
-	throw new Error('PUBLIC_SUPABASE_URL must be set (Phase 2 transitional).');
-}
-if (!env.SUPABASE_SECRET_KEY) {
-	throw new Error('SUPABASE_SECRET_KEY must be set (Phase 2 transitional).');
-}
-
-/**
- * Legacy typed Supabase admin client. Used by call sites pending migration.
- * Removed at the end of Phase 2.
- */
-export const db = createClient<Database>(pubEnv.PUBLIC_SUPABASE_URL, env.SUPABASE_SECRET_KEY, {
-	auth: {
-		autoRefreshToken: false,
-		persistSession: false
-	}
-});
