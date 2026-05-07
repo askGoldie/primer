@@ -126,6 +126,7 @@ This is the most-violated rule when AI assistants modify SvelteKit codebases. Ma
 | Wire a transactional email      | Replace the `console.log` lines in `src/routes/auth/{register,forgot-password,verify-email}/...` with your provider's SDK |
 | Add an SSO provider             | Replace `src/lib/server/auth/` with provider SDK; preserve the `validateSession()` shape used by hooks |
 | Add a custom report or export   | New route under `src/routes/app/reports/`; new SQL query in the loader                                  |
+| Regenerate the SBOM             | `npm run sbom` — writes `docs/sbom.csv` from `package-lock.json`. Re-run when dependencies change.       |
 
 ---
 
