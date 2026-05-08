@@ -52,6 +52,17 @@ You need a computer (laptop or server) and a database. That's it.
 
 No external API keys. No accounts to create. No SaaS subscriptions. No internet connection required at runtime (after the initial install).
 
+### What gets installed during the initial setup
+
+Once you run `npm install` (Option A) or `docker compose up -d` (Option B, which runs `npm install` inside the build container), npm reads the locked-down `package-lock.json` and downloads dependencies from the public npm registry. The full list with name, version, license, and integrity hash is checked into the zip at [`docs/sbom.csv`](./docs/sbom.csv) so your security or procurement team can review it without running anything.
+
+A summary of what it covers:
+
+- **2 runtime dependencies** — `postgres` (the Postgres driver) and `papaparse` (CSV parsing). These are the only packages loaded by `node build` when the application is serving traffic.
+- **~294 development dependencies** — TypeScript, ESLint, Prettier, the SvelteKit toolchain, Tailwind, and their transitive dependencies. They are needed to run `npm run check`, `npm run lint`, and `npm run build`. They are not loaded at runtime.
+
+To regenerate `docs/sbom.csv` after upgrading any dependency, run `npm run sbom`.
+
 ---
 
 ## Three deployment options

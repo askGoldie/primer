@@ -1,16 +1,32 @@
-# Primer Documentation Index
+# Internal Planning Index
 
-This `/docs` folder contains the **planning documents** that guide the transformation of this repository from its current dual-purpose state (public marketing demo + product) into the **customer-deliverable source-code package** described in `Primer-Delivery.md`.
+The documents in `docs/_internal/` are **internal planning artifacts** for the team building the customer-deliverable source-code package. They do **not** ship to customers — `.gitattributes` excludes this entire directory from `git archive`, and `npm run package` validates the exclusion.
 
-These documents are **internal planning artifacts** for the engineers performing the refactor. They are not the documents that ship to customers — those will be generated as outputs of the work described here (and the `06-customer-quickstart.md` doc is the spec for the customer-shipping README).
+`Primer-Delivery.md` is the source of truth for what the final customer package must look like. The `delivery-plan/` subfolder holds the phase specs that drove the transformation.
 
 ---
 
 ## How to read this folder
 
-1. **Start with `Primer-Delivery.md`** — this is the source of truth for what the final customer package must look like. Every other document here is in service of that target.
+1. **Start with `Primer-Delivery.md`** — every other document here is in service of that target.
 2. **Then read `delivery-plan/00-overview.md`** — it stitches the rest of the plan together, defines phases, and states what "done" means for each.
 3. **Read the numbered docs in `delivery-plan/` in order.** Each later doc assumes the earlier ones.
+
+---
+
+## Cutting a release
+
+The customer-deliverable zip is produced by `npm run package`, which:
+
+1. Runs `npm run check` (typecheck must pass).
+2. Warns if the working tree has uncommitted changes — `git archive` ships HEAD only, so dirty work won't make it into the zip.
+3. Reminds you to regenerate `docs/sbom.csv` (`npm run sbom`) and commit it if `package-lock.json` is newer.
+4. Runs `git archive HEAD --worktree-attributes --format=zip --prefix=primer-source/`, honouring the `export-ignore` rules in [`.gitattributes`](../../.gitattributes).
+5. Sanity-checks the resulting zip — confirms the customer-facing paths are present and that `docs/_internal/`, `skills/`, `node_modules/`, etc. are absent.
+
+The output lands at `primer-source-vX.Y.Z.zip` in the repo root. Share that file with the customer.
+
+If the script complains about leaks, the most likely cause is a new path that should be excluded — add it to `.gitattributes` under the `export-ignore` block.
 
 ---
 

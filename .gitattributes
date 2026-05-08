@@ -1,2 +1,38 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# ----------------------------------------------------------------------------
+# Files NOT shipped to customers in the source-code zip.
+#
+# `git archive HEAD --format=zip` (and `npm run package`, which wraps it)
+# honour these export-ignore rules. Anything listed here lives in the repo
+# for the development team but is excluded from the customer-deliverable.
+# ----------------------------------------------------------------------------
+
+# Internal planning docs (Primer-Delivery spec, phase plans, etc.).
+# Both the canonical _internal/ path and the legacy paths are listed,
+# so a forgotten file at the old location is still excluded.
+docs/_internal export-ignore
+docs/Primer-Delivery.md export-ignore
+docs/delivery-plan export-ignore
+docs/README.md export-ignore
+
+# Local AI tooling configuration
+skills export-ignore
+skills-lock.json export-ignore
+
+# This file itself
+.gitattributes export-ignore
+
+# Build/dev artefacts. These are gitignored for new commits but were
+# committed before .gitignore was added and remain in HEAD until a
+# `git rm --cached` cleanup. export-ignore keeps them out of the
+# customer zip regardless.
+node_modules export-ignore
+.svelte-kit export-ignore
+build export-ignore
+dist export-ignore
+
+# OS cruft (anywhere in the tree)
+.DS_Store export-ignore
+**/.DS_Store export-ignore

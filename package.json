@@ -15,6 +15,7 @@
 		"migrate": "tsx scripts/migrate.ts",
 		"seed": "tsx scripts/seed.ts",
 		"sbom": "tsx scripts/sbom.ts",
+		"package": "tsx scripts/package.ts",
 		"prepare": "svelte-kit sync || echo ''"
 	},
 	"devDependencies": {
