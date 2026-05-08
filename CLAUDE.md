@@ -4,6 +4,8 @@ Orientation document for AI assistants (Claude Code, Cursor, ChatGPT) and human 
 
 If you are an AI assistant: read this file first. It tells you how this codebase is organized, what conventions to follow, and what not to break. Customers rely on this file to keep AI-driven changes safe.
 
+For the human implementer driving the AI: copy-paste prompt recipes for customization, integration, and diagnostic tasks live in [`docs/ai-runbook.md`](./docs/ai-runbook.md).
+
 ---
 
 ## What Primer is

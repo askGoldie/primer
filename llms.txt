@@ -12,9 +12,14 @@ This file is a structured map for AI assistants. Read `README.md` for installati
 - Application-layer scrypt auth (`src/lib/server/auth/index.ts`); intended to be replaced with the customer's SSO
 
 ## Documentation
-- [README.md](./README.md): Customer quickstart — installation (Option A direct install, Option B Docker Compose), configuration, customization, troubleshooting
+- [README.md](./README.md): Customer quickstart — installation (Option A direct install, Option B Docker Compose), configuration, customization, troubleshooting, air-gap procedure
 - [CLAUDE.md](./CLAUDE.md): Orientation document for AI assistants and developers — project layout, conventions, non-negotiable rules (i18n, DB access, no telemetry, no RLS)
 - [.env.example](./.env.example): Annotated configuration reference; copy to `.env` and edit
+- [docs/architecture.md](./docs/architecture.md): Stack, request lifecycle, data model, integration seams (DB, auth, email, reverse proxy, monitoring, logs) for Option C planners
+- [docs/data-flow.md](./docs/data-flow.md): What data is stored, where, and what (does not) leave the server — for compliance / privacy review
+- [docs/ai-runbook.md](./docs/ai-runbook.md): Copy-paste prompts for running customization, integration, and diagnostic tasks through an AI coding assistant
+- [docs/sbom.csv](./docs/sbom.csv): Software Bill of Materials, generated from `package-lock.json` (regenerate with `npm run sbom`)
+- [docs/CHANGELOG.md](./docs/CHANGELOG.md): Version history (Keep a Changelog + SemVer); read before applying an update
 
 ## Source code
 - [src/routes/auth/](./src/routes/auth/): Login / register / password reset / email verification (placeholder flow; expected to be replaced for SSO/OIDC/SAML deployments)

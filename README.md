@@ -276,7 +276,7 @@ The bundled email/password auth at `src/lib/server/auth/` is a placeholder. For 
 
 ### Anything else
 
-The codebase is annotated for AI assistants. Open `CLAUDE.md` and feed it (and the file you want to change) to Claude, ChatGPT, or your tool of choice. Ask it to make the change.
+The codebase is annotated for AI assistants. Open Claude Code (or the agent of your choice) in the project root, and use the recipes in [`docs/ai-runbook.md`](./docs/ai-runbook.md) — they cover swapping in your SSO, wiring transactional email, putting Primer behind your reverse proxy, customization tasks, and diagnostic prompts.
 
 ---
 
@@ -285,11 +285,43 @@ The codebase is annotated for AI assistants. Open `CLAUDE.md` and feed it (and t
 When DavidPM publishes a new release:
 
 1. Download the new zip.
-2. Read the release notes shipped with it — note any breaking changes or migration notes.
+2. Read [`docs/CHANGELOG.md`](./docs/CHANGELOG.md) in the new zip. Pay attention to any **Breaking changes** entries under the version you're moving to.
 3. Replace your source folder with the new contents (preserving your `.env`).
 4. Run `npm run migrate` (Option A) or `docker compose pull && docker compose up -d --build` (Option B).
 
 You decide when to update. Older versions don't expire and don't phone home. There is no forced upgrade path.
+
+---
+
+## Air-gapped and offline deployments
+
+Primer makes zero outbound network calls at runtime — the application functions identically without internet access. The only network requirement is during initial install, when dependencies and (for Option B) container images are downloaded.
+
+### Option B (Docker) — air-gap workflow
+
+On a connected machine:
+
+```bash
+docker compose pull
+docker save primer-app primer-db caddy:2-alpine postgres:15-alpine -o primer-images.tar
+```
+
+Transfer `primer-images.tar` and the Primer source zip to the air-gapped network by whatever method your environment allows (USB, internal artifact registry, approved file transfer).
+
+On the target machine:
+
+```bash
+docker load -i primer-images.tar
+docker compose up -d
+```
+
+The first start applies migrations and (if `PRIMER_SEED_ON_BOOT=true`) seeds the demo data. Subsequent starts skip both.
+
+### Option A (Direct Install) — air-gap notes
+
+A direct-install air-gap is also possible: `npm install` runs on a connected machine, then the source folder _including its `node_modules/`_ is transferred to the air-gapped target. Run `npm run migrate && npm run build && node build` on the target. No further internet access is needed.
+
+A pre-built `node_modules` tarball matching the version in `package-lock.json` is available from DavidPM on request for environments where running `npm install` even once is restricted.
 
 ---
 
@@ -383,6 +415,10 @@ If any of those would be useful to your organization, you can add them. You own 
 ## Getting help
 
 - For codebase orientation: read `CLAUDE.md`.
+- For prompts you can copy into Claude Code (or another AI agent) to execute deployment, customization, integration, or diagnostic tasks: read [`docs/ai-runbook.md`](./docs/ai-runbook.md).
+- For architecture, data model, and integration seams: read [`docs/architecture.md`](./docs/architecture.md).
+- For privacy / compliance review: read [`docs/data-flow.md`](./docs/data-flow.md).
+- For dependency licensing review: see [`docs/sbom.csv`](./docs/sbom.csv) (regenerate with `npm run sbom`).
 - For human help: contact DavidPM, LLC at the support email on your purchase invoice.
 
 ---

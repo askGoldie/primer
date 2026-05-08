@@ -131,18 +131,6 @@ Tables grouped by domain:
 | `audit_log`           | Append-only history of mutations on org/hierarchy entities.        |
 | `placement_requests`  | New users requesting placement into the hierarchy by HR/admin.     |
 
-### Vestigial (demo-site leftovers)
-
-These tables exist in the schema but are not read or written by any code path in the customer build. They were created for the team-hosted demo's purchase-tracking and analytics features, which were stripped from the customer codebase. They are inert — a `npm run migrate` will create them, but nothing inserts into them and nothing queries them.
-
-| Table              | Origin                                                               |
-| ------------------ | -------------------------------------------------------------------- |
-| `licenses`         | Demo-site purchase tracking                                          |
-| `purchase_events`  | Demo-site purchase / contact-form analytics                          |
-| `account_events`, `demo_events`, `download_events`, `narrative_events` | Demo-site product analytics |
-
-If you want a tighter schema, you can write a new migration that drops them. They have no foreign keys pointing at the rest of the schema, so a `DROP TABLE … CASCADE` is safe.
-
 ---
 
 ## Seams
@@ -239,4 +227,5 @@ Things implementers sometimes try to swap that you should not:
 - For installation: [`README.md`](../README.md).
 - For codebase orientation as you start editing: [`CLAUDE.md`](../CLAUDE.md).
 - For machine-readable structure (paste into an AI assistant): [`llms.txt`](../llms.txt).
+- For privacy / compliance review: [`docs/data-flow.md`](./data-flow.md).
 - For human help on integrations specific to your environment: contact DavidPM, LLC at the support email on your purchase invoice.
