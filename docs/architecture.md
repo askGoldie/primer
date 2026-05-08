@@ -153,7 +153,7 @@ Where to plug your own infrastructure in. Each seam is a single file; the contra
 | **File**     | `src/lib/server/auth/index.ts`, used from `src/hooks.server.ts:handleAuth` |
 | **Contract** | `validateSession(sessionId: string): Promise<{ session, user } \| null>`. The hook reads the result and populates `event.locals.user` (shape declared in `src/app.d.ts`). Everything downstream reads `locals.user`. |
 | **Swap**     | Replace the body of `validateSession` with a call to your IdP's session/JWT verifier. Construct a `user` object matching the `App.Locals['user']` shape and return it. The login/register/reset routes can be deleted if your IdP owns those flows. |
-| **Notes**    | The bundled scrypt flow is intentionally a placeholder. Most Option C deployments swap the entire `auth/` module for OIDC, SAML, or LDAP. The session cookie name is `primer_session` and is set by `setSessionCookie(cookies, sessionId)` — adapt that helper to set whatever cookie or header your IdP uses, or remove it if your IdP manages cookies via its own middleware. |
+| **Notes**    | The bundled scrypt flow is intentionally a placeholder. Most Option C deployments swap the entire `auth/` module for OIDC, SAML, or LDAP. The session cookie name is `primer_session` and is set by `setSessionCookie(cookies, sessionId)` — adapt that helper to set whatever cookie or header your IdP uses, or remove it if your IdP manages cookies via its own middleware. **For the full contract, swap checklist, and coupling audit, see [`docs/auth-seam.md`](./auth-seam.md).** |
 
 ### Email (transactional)
 

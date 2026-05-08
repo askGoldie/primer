@@ -6,6 +6,8 @@ If you are an AI assistant: read this file first. It tells you how this codebase
 
 For the human implementer driving the AI: copy-paste prompt recipes for customization, integration, and diagnostic tasks live in [`docs/ai-runbook.md`](./docs/ai-runbook.md).
 
+For deeper architectural detail (data model, integration seams), see [`docs/architecture.md`](./docs/architecture.md).
+
 ---
 
 ## What Primer is
@@ -72,6 +74,31 @@ Runes mode is forced everywhere except `node_modules` (see `svelte.config.js`).
 
 ---
 
+## Commands
+
+All commands run from the project root.
+
+| Command | Purpose |
+| --- | --- |
+| `npm run dev` | Vite dev server with HMR (default http://localhost:5173). Use this while iterating on UI. |
+| `npm run build` | Production build via `@sveltejs/adapter-node`. Output in `build/`. |
+| `npm run start` (or `node build`) | Run the built server (port 3000). |
+| `npm run preview` | Preview a production build locally. |
+| `npm run check` | `svelte-kit sync` + `svelte-check` against `tsconfig.json`. Must pass before completing any non-trivial change. |
+| `npm run check:watch` | Same, in watch mode. |
+| `npm run lint` | `prettier --check .` then `eslint .`. Must pass. |
+| `npm run format` | `prettier --write .`. |
+| `npm run migrate` | Apply pending SQL files in `migrations/` (idempotent — tracked in `schema_migrations`). |
+| `npm run seed` | Apply pending SQL files in `seeds/` (idempotent — tracked in `schema_seeds`). |
+| `npm run sbom` | Regenerate `docs/sbom.csv` from `package-lock.json`. |
+| `npm run package` | Build the customer-deliverable source zip (`scripts/package.ts`). |
+
+There is no runtime test framework. `check` and `lint` are the only gates.
+
+Note: `npm run dev` serves on Vite's default port (5173); `node build` serves on 3000.
+
+---
+
 ## The three deployment options
 
 One paragraph each. Full instructions in `README.md`.
@@ -112,6 +139,7 @@ This is the most-violated rule when AI assistants modify SvelteKit codebases. Ma
 - `hooks.server.ts` reads the cookie on every request, calls `validateSession()`, and populates `event.locals.user`. Routes under `/app` redirect to `/auth/login` if `locals.user` is null.
 - Passwords are scrypt-hashed via `src/lib/server/auth/index.ts`. Sessions are random 32-byte tokens stored in the `sessions` table.
 - **The bundled flow is intentionally a placeholder.** Most Option C deployments swap the entire `src/lib/server/auth/` module for an OIDC/SAML/LDAP integration. The contract downstream code depends on is `event.locals.user` — replace `validateSession()` with a call to your provider; everything that reads `locals.user` keeps working.
+- **Full contract, swap checklist, and coupling audit** are in [`docs/auth-seam.md`](./docs/auth-seam.md). Start there before editing anything under `src/lib/server/auth/` or `src/routes/auth/`.
 
 ---
 
