@@ -22,21 +22,21 @@
  * @see /docs/hierarchy-system-reference.md §8 for the origin spec
  */
 
-import type { HierarchyNodeType } from '$lib/types/index.js';
+import type { HierarchyNodeType } from "$lib/types/index.js";
 
 /**
  * A single node in a hierarchy template. The template is processed
  * depth-first to create real database rows at populate time.
  */
 export interface HierarchyTemplateNode {
-	/** Which containment slot this node occupies */
-	nodeType: HierarchyNodeType;
-	/** Display name (e.g. "Finance", "Accounting Team") */
-	name: string;
-	/** Optional job title for executives/managers */
-	title?: string;
-	/** Nested children; omit for leaf nodes */
-	children?: HierarchyTemplateNode[];
+  /** Which containment slot this node occupies */
+  nodeType: HierarchyNodeType;
+  /** Display name (e.g. "Finance", "Accounting Team") */
+  name: string;
+  /** Optional job title for executives/managers */
+  title?: string;
+  /** Nested children; omit for leaf nodes */
+  children?: HierarchyTemplateNode[];
 }
 
 /**
@@ -44,66 +44,66 @@ export interface HierarchyTemplateNode {
  * for a given executive count.
  */
 const DEPARTMENT_POOL: HierarchyTemplateNode[] = [
-	{
-		nodeType: 'department',
-		name: 'Finance',
-		title: 'CFO',
-		children: [
-			{ nodeType: 'team', name: 'Accounting' },
-			{ nodeType: 'team', name: 'Financial Planning' }
-		]
-	},
-	{
-		nodeType: 'department',
-		name: 'Operations',
-		title: 'COO',
-		children: [
-			{ nodeType: 'team', name: 'Production' },
-			{ nodeType: 'team', name: 'Logistics' }
-		]
-	},
-	{
-		nodeType: 'department',
-		name: 'Sales',
-		title: 'Sales Manager',
-		children: [{ nodeType: 'team', name: 'Account Executives' }]
-	},
-	{
-		nodeType: 'department',
-		name: 'Marketing',
-		title: 'Marketing Director',
-		children: [
-			{ nodeType: 'team', name: 'Brand' },
-			{ nodeType: 'team', name: 'Growth' }
-		]
-	},
-	{
-		nodeType: 'department',
-		name: 'Technology',
-		title: 'CTO',
-		children: [
-			{ nodeType: 'team', name: 'Engineering' },
-			{ nodeType: 'team', name: 'Infrastructure' }
-		]
-	},
-	{
-		nodeType: 'department',
-		name: 'Human Resources',
-		title: 'HR Director',
-		children: [{ nodeType: 'team', name: 'People Operations' }]
-	},
-	{
-		nodeType: 'department',
-		name: 'Legal & Compliance',
-		title: 'General Counsel',
-		children: [{ nodeType: 'team', name: 'Compliance' }]
-	},
-	{
-		nodeType: 'department',
-		name: 'Product',
-		title: 'VP Product',
-		children: [{ nodeType: 'team', name: 'Product Management' }]
-	}
+  {
+    nodeType: "department",
+    name: "Finance",
+    title: "CFO",
+    children: [
+      { nodeType: "team", name: "Accounting" },
+      { nodeType: "team", name: "Financial Planning" },
+    ],
+  },
+  {
+    nodeType: "department",
+    name: "Operations",
+    title: "COO",
+    children: [
+      { nodeType: "team", name: "Production" },
+      { nodeType: "team", name: "Logistics" },
+    ],
+  },
+  {
+    nodeType: "department",
+    name: "Sales",
+    title: "Sales Manager",
+    children: [{ nodeType: "team", name: "Account Executives" }],
+  },
+  {
+    nodeType: "department",
+    name: "Marketing",
+    title: "Marketing Director",
+    children: [
+      { nodeType: "team", name: "Brand" },
+      { nodeType: "team", name: "Growth" },
+    ],
+  },
+  {
+    nodeType: "department",
+    name: "Technology",
+    title: "CTO",
+    children: [
+      { nodeType: "team", name: "Engineering" },
+      { nodeType: "team", name: "Infrastructure" },
+    ],
+  },
+  {
+    nodeType: "department",
+    name: "Human Resources",
+    title: "HR Director",
+    children: [{ nodeType: "team", name: "People Operations" }],
+  },
+  {
+    nodeType: "department",
+    name: "Legal & Compliance",
+    title: "General Counsel",
+    children: [{ nodeType: "team", name: "Compliance" }],
+  },
+  {
+    nodeType: "department",
+    name: "Product",
+    title: "VP Product",
+    children: [{ nodeType: "team", name: "Product Management" }],
+  },
 ];
 
 /**
@@ -113,15 +113,17 @@ const DEPARTMENT_POOL: HierarchyTemplateNode[] = [
  * @param executiveCount - Number of executive departments (clamped to 3-8)
  * @returns Root-level template nodes; pass `null` parent when populating
  */
-export function getHierarchyTemplate(executiveCount: number): HierarchyTemplateNode[] {
-	const clamped = Math.min(Math.max(executiveCount, 3), 8);
+export function getHierarchyTemplate(
+  executiveCount: number,
+): HierarchyTemplateNode[] {
+  const clamped = Math.min(Math.max(executiveCount, 3), 8);
 
-	return [
-		{
-			nodeType: 'executive_leader',
-			name: 'CEO / President',
-			title: 'CEO',
-			children: DEPARTMENT_POOL.slice(0, clamped)
-		}
-	];
+  return [
+    {
+      nodeType: "executive_leader",
+      name: "CEO / President",
+      title: "CEO",
+      children: DEPARTMENT_POOL.slice(0, clamped),
+    },
+  ];
 }

@@ -9,7 +9,7 @@
  * @see /docs/hierarchy-system-reference.md §3.2 for the source-of-truth rules
  */
 
-import { VALID_PARENTS, type HierarchyNodeType } from '$lib/types/index.js';
+import { VALID_PARENTS, type HierarchyNodeType } from "$lib/types/index.js";
 
 /**
  * Check whether a child of `nodeType` is allowed to sit under a parent
@@ -21,11 +21,11 @@ import { VALID_PARENTS, type HierarchyNodeType } from '$lib/types/index.js';
  * validateContainment('executive_leader', null)   // true
  */
 export function validateContainment(
-	nodeType: HierarchyNodeType,
-	parentType: HierarchyNodeType | null
+  nodeType: HierarchyNodeType,
+  parentType: HierarchyNodeType | null,
 ): boolean {
-	if (parentType === null) {
-		return nodeType === 'executive_leader';
-	}
-	return VALID_PARENTS[nodeType].includes(parentType);
+  if (parentType === null) {
+    return nodeType === "executive_leader";
+  }
+  return VALID_PARENTS[nodeType].includes(parentType);
 }

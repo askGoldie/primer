@@ -5,9 +5,9 @@
  * This redirect preserves any existing bookmarks or direct links.
  */
 
-import { redirect } from '@sveltejs/kit';
-import type { PageServerLoad } from './$types.js';
+import { redirect } from "@sveltejs/kit";
+import type { PageServerLoad } from "./$types.js";
 
 export const load: PageServerLoad = async () => {
-	redirect(302, '/app/goals');
+  redirect(302, "/app/goals");
 };

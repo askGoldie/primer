@@ -8,11 +8,11 @@
  * @see /src/lib/server/permissions.ts for authorization checks
  */
 
-import { sql, many } from '$lib/server/db.js';
+import { sql, many } from "$lib/server/db.js";
 
 interface NodeRow {
-	id: string;
-	parent_id: string | null;
+  id: string;
+  parent_id: string | null;
 }
 
 /**
@@ -29,28 +29,28 @@ interface NodeRow {
  * @returns Array of descendant node IDs (excludes the root itself)
  */
 export async function getSubtreeNodeIds(
-	rootNodeId: string,
-	organizationId: string
+  rootNodeId: string,
+  organizationId: string,
 ): Promise<string[]> {
-	const nodes = await many<NodeRow>(sql`
+  const nodes = await many<NodeRow>(sql`
 		select id, parent_id
 		from org_hierarchy_nodes
 		where organization_id = ${organizationId}
 	`);
 
-	const descendants: string[] = [];
+  const descendants: string[] = [];
 
-	function collect(parentId: string) {
-		for (const node of nodes) {
-			if (node.parent_id === parentId) {
-				descendants.push(node.id);
-				collect(node.id);
-			}
-		}
-	}
+  function collect(parentId: string) {
+    for (const node of nodes) {
+      if (node.parent_id === parentId) {
+        descendants.push(node.id);
+        collect(node.id);
+      }
+    }
+  }
 
-	collect(rootNodeId);
-	return descendants;
+  collect(rootNodeId);
+  return descendants;
 }
 
 /**
@@ -61,16 +61,16 @@ export async function getSubtreeNodeIds(
  * @returns Array of direct child node IDs
  */
 export async function getDirectChildNodeIds(
-	parentNodeId: string,
-	organizationId: string
+  parentNodeId: string,
+  organizationId: string,
 ): Promise<string[]> {
-	const children = await many<{ id: string }>(sql`
+  const children = await many<{ id: string }>(sql`
 		select id
 		from org_hierarchy_nodes
 		where parent_id = ${parentNodeId} and organization_id = ${organizationId}
 	`);
 
-	return children.map((c) => c.id);
+  return children.map((c) => c.id);
 }
 
 /**
@@ -82,23 +82,23 @@ export async function getDirectChildNodeIds(
  * @returns true if userNodeId is an ancestor of targetNodeId
  */
 export async function isAncestorOf(
-	userNodeId: string,
-	targetNodeId: string,
-	organizationId: string
+  userNodeId: string,
+  targetNodeId: string,
+  organizationId: string,
 ): Promise<boolean> {
-	const allNodes = await many<NodeRow>(sql`
+  const allNodes = await many<NodeRow>(sql`
 		select id, parent_id
 		from org_hierarchy_nodes
 		where organization_id = ${organizationId}
 	`);
 
-	let currentId: string | null = targetNodeId;
-	while (currentId) {
-		const node: NodeRow | undefined = allNodes.find((n) => n.id === currentId);
-		if (!node?.parent_id) return false;
-		if (node.parent_id === userNodeId) return true;
-		currentId = node.parent_id;
-	}
+  let currentId: string | null = targetNodeId;
+  while (currentId) {
+    const node: NodeRow | undefined = allNodes.find((n) => n.id === currentId);
+    if (!node?.parent_id) return false;
+    if (node.parent_id === userNodeId) return true;
+    currentId = node.parent_id;
+  }
 
-	return false;
+  return false;
 }

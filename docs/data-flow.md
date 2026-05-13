@@ -45,33 +45,33 @@ All persistent data lives in the customer's PostgreSQL database. The schema is d
 
 ### Identity and access
 
-| Table                       | Holds                                                                           |
-| --------------------------- | ------------------------------------------------------------------------------- |
-| `users`                     | Email, name, locale preference, scrypt-hashed password (never plaintext), `is_admin` flag, deactivation date. |
+| Table                       | Holds                                                                                                                                  |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `users`                     | Email, name, locale preference, scrypt-hashed password (never plaintext), `is_admin` flag, deactivation date.                          |
 | `sessions`                  | Active session token (random), the `user_id` it belongs to, expiry timestamp. **No IP address, no user-agent, no device fingerprint.** |
-| `email_verification_tokens` | One-shot tokens issued during registration. Hashed before storage.              |
-| `password_reset_tokens`     | One-shot tokens issued by the password-reset flow. Hashed before storage.       |
-| `organizations`             | Organization record — name, cycle cadence, configuration toggles.               |
-| `org_members`               | User × organization × role (owner / system_admin / hr_admin / editor / participant / viewer). |
-| `org_hierarchy_nodes`       | The org chart. Each node may bind to a `user_id`; nodes also carry `name`, `title`, `description`. |
-| `visibility_grants`         | Optional cross-tree access grants (e.g. CEO grants HR ancestor-equivalent access into a subtree). |
+| `email_verification_tokens` | One-shot tokens issued during registration. Hashed before storage.                                                                     |
+| `password_reset_tokens`     | One-shot tokens issued by the password-reset flow. Hashed before storage.                                                              |
+| `organizations`             | Organization record — name, cycle cadence, configuration toggles.                                                                      |
+| `org_members`               | User × organization × role (owner / system_admin / hr_admin / editor / participant / viewer).                                          |
+| `org_hierarchy_nodes`       | The org chart. Each node may bind to a `user_id`; nodes also carry `name`, `title`, `description`.                                     |
+| `visibility_grants`         | Optional cross-tree access grants (e.g. CEO grants HR ancestor-equivalent access into a subtree).                                      |
 
 ### Performance and goals (the operational data)
 
-| Table                | Holds                                                                  |
-| -------------------- | ---------------------------------------------------------------------- |
-| `metrics`, `metric_thresholds`, `metric_reviews` | Per-person performance metrics, the descriptions of each tier, and submission/approval state. |
-| `score_snapshots`    | Immutable performance captures at a point in time.                     |
-| `performance_logs`   | Periodic measurements feeding the tier framework.                      |
-| `org_goals`, `goal_dependencies`, `goal_adjustments` | Goal definitions, cross-goal links, and per-field change history. |
-| `inquiries`, `inquiry_comments` | Self-inquiries (recalibrate one's own thresholds) and peer inquiries (challenge a peer's metric), with threaded discussion. |
+| Table                                                | Holds                                                                                                                       |
+| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `metrics`, `metric_thresholds`, `metric_reviews`     | Per-person performance metrics, the descriptions of each tier, and submission/approval state.                               |
+| `score_snapshots`                                    | Immutable performance captures at a point in time.                                                                          |
+| `performance_logs`                                   | Periodic measurements feeding the tier framework.                                                                           |
+| `org_goals`, `goal_dependencies`, `goal_adjustments` | Goal definitions, cross-goal links, and per-field change history.                                                           |
+| `inquiries`, `inquiry_comments`                      | Self-inquiries (recalibrate one's own thresholds) and peer inquiries (challenge a peer's metric), with threaded discussion. |
 
 ### Operations
 
-| Table                | Holds                                                                  |
-| -------------------- | ---------------------------------------------------------------------- |
+| Table                | Holds                                                                                                                                                                                                    |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `audit_log`          | Append-only history of mutations on hierarchy and organization entities. Each row has `entity_id`, the user who made the change, JSON snapshots of before and after, and a timestamp. **No IP address.** |
-| `placement_requests` | New users requesting placement into the hierarchy by HR/admin.         |
+| `placement_requests` | New users requesting placement into the hierarchy by HR/admin.                                                                                                                                           |
 
 ---
 
@@ -93,10 +93,10 @@ The codebase **does not capture** any of the following, in any table:
 
 Primer sets two HTTP cookies. Both are first-party (same domain as the app) and contain no third-party identifiers.
 
-| Cookie           | Purpose                                                                | Attributes                              | TTL    |
-| ---------------- | ---------------------------------------------------------------------- | --------------------------------------- | ------ |
+| Cookie           | Purpose                                                                                        | Attributes                                                  | TTL    |
+| ---------------- | ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ------ |
 | `primer_session` | Session identifier. Looked up against the `sessions` table on each request. Cleared on logout. | `HttpOnly`, `SameSite=Lax`, `Secure` when served over HTTPS | 7 days |
-| `primer_lang`    | The user's preferred locale (e.g. `en`, `de`, `ja`).                   | `SameSite=Lax`                          | 1 year |
+| `primer_lang`    | The user's preferred locale (e.g. `en`, `de`, `ja`).                                           | `SameSite=Lax`                                              | 1 year |
 
 No other cookies are set by the application code. Reverse proxies and CDNs in front of the app may set their own (e.g. Caddy / CloudFlare); those are outside the app's control and outside the scope of this document.
 
@@ -108,13 +108,13 @@ Application output is written to **stdout and stderr only**. There is no file-ba
 
 What the code logs:
 
-| Log line                                  | Contents                                                          | Notes                                                             |
-| ----------------------------------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------- |
-| Migration / seed progress                 | Filenames                                                         | Operational only.                                                 |
-| Healthcheck failures (`/api/health`)      | Database error string                                             | No user data.                                                     |
-| Auth-hook errors                          | Error message                                                     | Errors during session validation; written but never returned to the client. |
-| Audit-write warnings                      | Error message                                                     | When `audit_log` insert fails; the parent mutation continues.     |
-| **Verification / password-reset URLs**    | **User email address and a tokenised URL**                        | See note below.                                                   |
+| Log line                               | Contents                                   | Notes                                                                       |
+| -------------------------------------- | ------------------------------------------ | --------------------------------------------------------------------------- |
+| Migration / seed progress              | Filenames                                  | Operational only.                                                           |
+| Healthcheck failures (`/api/health`)   | Database error string                      | No user data.                                                               |
+| Auth-hook errors                       | Error message                              | Errors during session validation; written but never returned to the client. |
+| Audit-write warnings                   | Error message                              | When `audit_log` insert fails; the parent mutation continues.               |
+| **Verification / password-reset URLs** | **User email address and a tokenised URL** | See note below.                                                             |
 
 **Important for compliance reviewers:** the `/auth/register`, `/auth/forgot-password`, and `/auth/verify-email/resend` routes log the user's email and a one-shot tokenised URL to stdout (e.g. `[register] verification link for jane@example.com: https://primer.your-co.com/auth/verify-email?token=…`). This is intentional — Primer ships **without** a transactional email integration, so these log lines are how an operator can complete verification or password reset manually during evaluation. In production, this means:
 
@@ -159,16 +159,16 @@ For deployments behind a corporate firewall or air-gapped network: Primer has ze
 
 The `audit_log` table is appended to on hierarchy and organization mutations. Each row records:
 
-| Column            | What it captures                                                              |
-| ----------------- | ----------------------------------------------------------------------------- |
-| `entity_type`     | The kind of object that changed (`node`, etc.).                               |
-| `entity_id`       | Which object.                                                                 |
-| `action`          | `created`, `updated`, `deleted`, `bound`, `unbound`.                          |
-| `changed_by`      | The acting user (FK to `users`).                                              |
-| `previous_value`  | JSON snapshot of the row before the change (null on create).                  |
-| `new_value`       | JSON snapshot of the row after the change (null on delete).                   |
-| `context`         | Free-text reason: `dissolve`, `bulk_reparent`, `restore`, etc.                |
-| `created_at`      | Timestamp.                                                                    |
+| Column           | What it captures                                               |
+| ---------------- | -------------------------------------------------------------- |
+| `entity_type`    | The kind of object that changed (`node`, etc.).                |
+| `entity_id`      | Which object.                                                  |
+| `action`         | `created`, `updated`, `deleted`, `bound`, `unbound`.           |
+| `changed_by`     | The acting user (FK to `users`).                               |
+| `previous_value` | JSON snapshot of the row before the change (null on create).   |
+| `new_value`      | JSON snapshot of the row after the change (null on delete).    |
+| `context`        | Free-text reason: `dissolve`, `bulk_reparent`, `restore`, etc. |
+| `created_at`     | Timestamp.                                                     |
 
 **No IP address, no user-agent, no request ID.** The audit trail is _organisationally_ complete — it identifies who changed what and when — but does not record session metadata.
 

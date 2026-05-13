@@ -19,11 +19,16 @@
  * Wraps in quotes if the value contains commas, quotes, or newlines.
  */
 function escapeField(value: unknown): string {
-	const str = value === null || value === undefined ? '' : String(value);
-	if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
-		return `"${str.replace(/"/g, '""')}"`;
-	}
-	return str;
+  const str = value === null || value === undefined ? "" : String(value);
+  if (
+    str.includes(",") ||
+    str.includes('"') ||
+    str.includes("\n") ||
+    str.includes("\r")
+  ) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
 }
 
 /**
@@ -34,10 +39,10 @@ function escapeField(value: unknown): string {
  * @returns UTF-8 CSV string with BOM for Excel compatibility
  */
 export function toCsv(headers: string[], rows: unknown[][]): string {
-	const bom = '\uFEFF'; // UTF-8 BOM for Excel
-	const headerLine = headers.map(escapeField).join(',');
-	const dataLines = rows.map((row) => row.map(escapeField).join(','));
-	return bom + [headerLine, ...dataLines].join('\r\n');
+  const bom = "\uFEFF"; // UTF-8 BOM for Excel
+  const headerLine = headers.map(escapeField).join(",");
+  const dataLines = rows.map((row) => row.map(escapeField).join(","));
+  return bom + [headerLine, ...dataLines].join("\r\n");
 }
 
 /**
@@ -47,10 +52,10 @@ export function toCsv(headers: string[], rows: unknown[][]): string {
  * @param csv - The CSV string content
  */
 export function csvResponse(filename: string, csv: string): Response {
-	return new Response(csv, {
-		headers: {
-			'Content-Type': 'text/csv; charset=utf-8',
-			'Content-Disposition': `attachment; filename="${filename}"`
-		}
-	});
+  return new Response(csv, {
+    headers: {
+      "Content-Type": "text/csv; charset=utf-8",
+      "Content-Disposition": `attachment; filename="${filename}"`,
+    },
+  });
 }

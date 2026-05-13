@@ -8,9 +8,9 @@
  * This server load exists only to preserve old bookmarks and internal links.
  */
 
-import { redirect } from '@sveltejs/kit';
-import type { PageServerLoad } from './$types.js';
+import { redirect } from "@sveltejs/kit";
+import type { PageServerLoad } from "./$types.js";
 
 export const load: PageServerLoad = async () => {
-	redirect(302, '/app/settings?tab=audit');
+  redirect(302, "/app/settings?tab=audit");
 };

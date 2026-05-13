@@ -20,27 +20,29 @@
  * Optional env: DATABASE_SSL=require (set for managed Postgres providers)
  */
 
-import postgres from 'postgres';
-import { readdirSync, readFileSync } from 'node:fs';
-import { join, dirname, resolve as resolvePath } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { randomBytes, scrypt } from 'node:crypto';
-import 'dotenv/config';
+import postgres from "postgres";
+import { readdirSync, readFileSync } from "node:fs";
+import { join, dirname, resolve as resolvePath } from "node:path";
+import { fileURLToPath } from "node:url";
+import { randomBytes, scrypt } from "node:crypto";
+import "dotenv/config";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const seedsDir = resolvePath(__dirname, '..', 'seeds');
+const seedsDir = resolvePath(__dirname, "..", "seeds");
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
-	console.error('error: DATABASE_URL is not set. Copy .env.example to .env and set it.');
-	process.exit(1);
+  console.error(
+    "error: DATABASE_URL is not set. Copy .env.example to .env and set it.",
+  );
+  process.exit(1);
 }
 
 const sql = postgres(databaseUrl, {
-	ssl: process.env.DATABASE_SSL === 'require' ? 'require' : false,
-	max: 1,
-	idle_timeout: 5,
-	connect_timeout: 10
+  ssl: process.env.DATABASE_SSL === "require" ? "require" : false,
+  max: 1,
+  idle_timeout: 5,
+  connect_timeout: 10,
 });
 
 /**
@@ -48,69 +50,73 @@ const sql = postgres(databaseUrl, {
  * password so anyone evaluating the demo can sign in as any of them.
  */
 const DEMO_EMAILS = [
-	'demo@primer.company',
-	'marcus@demo.primer.company',
-	'rachel@demo.primer.company',
-	'james@demo.primer.company',
-	'nina@demo.primer.company'
+  "demo@primer.company",
+  "marcus@demo.primer.company",
+  "rachel@demo.primer.company",
+  "james@demo.primer.company",
+  "nina@demo.primer.company",
 ];
-const DEMO_PASSWORD = 'demo2025';
+const DEMO_PASSWORD = "demo2025";
 
 function scryptAsync(password: string, salt: string): Promise<string> {
-	return new Promise((resolve, reject) => {
-		scrypt(password, salt, 64, (err, derivedKey) => {
-			if (err) reject(err);
-			else resolve(derivedKey.toString('hex'));
-		});
-	});
+  return new Promise((resolve, reject) => {
+    scrypt(password, salt, 64, (err, derivedKey) => {
+      if (err) reject(err);
+      else resolve(derivedKey.toString("hex"));
+    });
+  });
 }
 
 async function hashPassword(password: string): Promise<string> {
-	const salt = randomBytes(16).toString('hex');
-	const hash = await scryptAsync(password, salt);
-	return `${salt}:${hash}`;
+  const salt = randomBytes(16).toString("hex");
+  const hash = await scryptAsync(password, salt);
+  return `${salt}:${hash}`;
 }
 
 async function applySeeds(): Promise<number> {
-	await sql`
+  await sql`
 		create table if not exists schema_seeds (
 			filename text primary key,
 			applied_at timestamptz not null default now()
 		)
 	`;
 
-	const appliedRows = await sql<{ filename: string }[]>`select filename from schema_seeds`;
-	const applied = new Set(appliedRows.map((r) => r.filename));
+  const appliedRows = await sql<
+    { filename: string }[]
+  >`select filename from schema_seeds`;
+  const applied = new Set(appliedRows.map((r) => r.filename));
 
-	const files = readdirSync(seedsDir)
-		.filter((f) => f.endsWith('.sql'))
-		.sort();
+  const files = readdirSync(seedsDir)
+    .filter((f) => f.endsWith(".sql"))
+    .sort();
 
-	if (files.length === 0) {
-		console.log('no seed files found in seeds/');
-		return 0;
-	}
+  if (files.length === 0) {
+    console.log("no seed files found in seeds/");
+    return 0;
+  }
 
-	let appliedCount = 0;
-	for (const file of files) {
-		if (applied.has(file)) {
-			console.log(`skip  ${file}`);
-			continue;
-		}
+  let appliedCount = 0;
+  for (const file of files) {
+    if (applied.has(file)) {
+      console.log(`skip  ${file}`);
+      continue;
+    }
 
-		console.log(`apply ${file}`);
-		const text = readFileSync(join(seedsDir, file), 'utf8');
+    console.log(`apply ${file}`);
+    const text = readFileSync(join(seedsDir, file), "utf8");
 
-		await sql.begin(async (tx) => {
-			await tx.unsafe(text);
-			await tx`insert into schema_seeds (filename) values (${file})`;
-		});
+    await sql.begin(async (tx) => {
+      await tx.unsafe(text);
+      await tx`insert into schema_seeds (filename) values (${file})`;
+    });
 
-		appliedCount += 1;
-	}
+    appliedCount += 1;
+  }
 
-	console.log(`seeds — ${appliedCount} applied, ${files.length - appliedCount} already up to date`);
-	return appliedCount;
+  console.log(
+    `seeds — ${appliedCount} applied, ${files.length - appliedCount} already up to date`,
+  );
+  return appliedCount;
 }
 
 /**
@@ -121,29 +127,31 @@ async function applySeeds(): Promise<number> {
  * never invalidates a session minted between runs.
  */
 async function setDemoPasswords(): Promise<void> {
-	const passwordHash = await hashPassword(DEMO_PASSWORD);
-	const result = await sql`
+  const passwordHash = await hashPassword(DEMO_PASSWORD);
+  const result = await sql`
 		update users
 		set password_hash = ${passwordHash}
 		where email in ${sql(DEMO_EMAILS)}
 		  and password_hash is null
 	`;
-	if (result.count > 0) {
-		console.log(`set demo password on ${result.count} user(s) — login: demo@primer.company / ${DEMO_PASSWORD}`);
-	}
+  if (result.count > 0) {
+    console.log(
+      `set demo password on ${result.count} user(s) — login: demo@primer.company / ${DEMO_PASSWORD}`,
+    );
+  }
 }
 
 async function main(): Promise<void> {
-	await applySeeds();
-	await setDemoPasswords();
-	console.log('done');
+  await applySeeds();
+  await setDemoPasswords();
+  console.log("done");
 }
 
 main()
-	.catch((err) => {
-		console.error('seed failed:', err);
-		process.exit(1);
-	})
-	.finally(async () => {
-		await sql.end();
-	});
+  .catch((err) => {
+    console.error("seed failed:", err);
+    process.exit(1);
+  })
+  .finally(async () => {
+    await sql.end();
+  });

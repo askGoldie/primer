@@ -6,10 +6,13 @@
  * (filters, pagination) are forwarded so deep links keep working.
  */
 
-import { redirect } from '@sveltejs/kit';
-import type { PageServerLoad } from './$types.js';
+import { redirect } from "@sveltejs/kit";
+import type { PageServerLoad } from "./$types.js";
 
 export const load: PageServerLoad = async ({ url }) => {
-	const qs = url.searchParams.toString();
-	redirect(302, qs ? `/app/settings/audit-log?${qs}` : '/app/settings/audit-log');
+  const qs = url.searchParams.toString();
+  redirect(
+    302,
+    qs ? `/app/settings/audit-log?${qs}` : "/app/settings/audit-log",
+  );
 };

@@ -5,6 +5,6 @@
  * client-side session client — `locals.user` is read on every request.
  */
 
-import type { LayoutLoad } from './$types.js';
+import type { LayoutLoad } from "./$types.js";
 
 export const load: LayoutLoad = ({ data }) => data;

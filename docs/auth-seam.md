@@ -4,7 +4,7 @@ For the engineer integrating Primer with your identity provider. Tells you exact
 
 Primer ships with email/password authentication as a placeholder. Most deployments replace it. Every customer's identity provider is different — attribute mapping, group claims, MFA policies, certificate rotation, session lifetimes — and a pre-baked integration would be wrong for someone else. Instead, the codebase exposes a small, well-defined contract that any auth system can plug into.
 
-**You do the integration work. The codebase makes the integration *point* small enough that the work is bounded.**
+**You do the integration work. The codebase makes the integration _point_ small enough that the work is bounded.**
 
 ---
 
@@ -20,10 +20,10 @@ Declared in [`src/app.d.ts`](../src/app.d.ts). Resolves to the `User` interface 
 
 ```ts
 interface User {
-  id: string;            // stable per-user identifier — UUID is fine, IdP "sub" claim is fine
+  id: string; // stable per-user identifier — UUID is fine, IdP "sub" claim is fine
   email: string;
   name: string;
-  locale: string;        // 'en', 'es', 'de', etc. Default to 'en' if your IdP doesn't carry it.
+  locale: string; // 'en', 'es', 'de', etc. Default to 'en' if your IdP doesn't carry it.
   deactivatedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -55,7 +55,7 @@ const handleAuth: Handle = async ({ event, resolve }) => {
   const result = await yourValidateRequest(event);
 
   if (result) {
-    event.locals.user = result.user;       // must match the User interface above
+    event.locals.user = result.user; // must match the User interface above
     event.locals.isAdmin = result.isAdmin; // boolean
   }
 

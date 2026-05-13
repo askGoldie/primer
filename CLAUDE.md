@@ -78,20 +78,20 @@ Runes mode is forced everywhere except `node_modules` (see `svelte.config.js`).
 
 All commands run from the project root.
 
-| Command | Purpose |
-| --- | --- |
-| `npm run dev` | Vite dev server with HMR (default http://localhost:5173). Use this while iterating on UI. |
-| `npm run build` | Production build via `@sveltejs/adapter-node`. Output in `build/`. |
-| `npm run start` (or `node build`) | Run the built server (port 3000). |
-| `npm run preview` | Preview a production build locally. |
-| `npm run check` | `svelte-kit sync` + `svelte-check` against `tsconfig.json`. Must pass before completing any non-trivial change. |
-| `npm run check:watch` | Same, in watch mode. |
-| `npm run lint` | `prettier --check .` then `eslint .`. Must pass. |
-| `npm run format` | `prettier --write .`. |
-| `npm run migrate` | Apply pending SQL files in `migrations/` (idempotent — tracked in `schema_migrations`). |
-| `npm run seed` | Apply pending SQL files in `seeds/` (idempotent — tracked in `schema_seeds`). |
-| `npm run sbom` | Regenerate `docs/sbom.csv` from `package-lock.json`. |
-| `npm run package` | Build the customer-deliverable source zip (`scripts/package.ts`). |
+| Command                           | Purpose                                                                                                         |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `npm run dev`                     | Vite dev server with HMR (default http://localhost:5173). Use this while iterating on UI.                       |
+| `npm run build`                   | Production build via `@sveltejs/adapter-node`. Output in `build/`.                                              |
+| `npm run start` (or `node build`) | Run the built server (port 3000).                                                                               |
+| `npm run preview`                 | Preview a production build locally.                                                                             |
+| `npm run check`                   | `svelte-kit sync` + `svelte-check` against `tsconfig.json`. Must pass before completing any non-trivial change. |
+| `npm run check:watch`             | Same, in watch mode.                                                                                            |
+| `npm run lint`                    | `prettier --check .` then `eslint .`. Must pass.                                                                |
+| `npm run format`                  | `prettier --write .`.                                                                                           |
+| `npm run migrate`                 | Apply pending SQL files in `migrations/` (idempotent — tracked in `schema_migrations`).                         |
+| `npm run seed`                    | Apply pending SQL files in `seeds/` (idempotent — tracked in `schema_seeds`).                                   |
+| `npm run sbom`                    | Regenerate `docs/sbom.csv` from `package-lock.json`.                                                            |
+| `npm run package`                 | Build the customer-deliverable source zip (`scripts/package.ts`).                                               |
 
 There is no runtime test framework. `check` and `lint` are the only gates.
 
@@ -126,7 +126,7 @@ This is the most-violated rule when AI assistants modify SvelteKit codebases. Ma
 ## Database access (non-negotiable)
 
 - **All server-side database access** goes through `src/lib/server/db.ts`, which exports a `postgres-js` tagged-template `sql` plus three helpers: `one`, `maybeOne`, `many`.
-- **Use parameterized queries.** `sql\`select * from users where id = ${userId}\`` — postgres-js handles parameterization. **Never** string-concatenate user input into SQL.
+- **Use parameterized queries.** `sql\`select \* from users where id = ${userId}\`` — postgres-js handles parameterization. **Never** string-concatenate user input into SQL.
 - **Schema changes go in `migrations/`.** Add a new file (`migrations/YYYYMMDDHHMMSS_description.sql`); never modify existing migration files. Customers' existing databases have already applied them. The runner (`scripts/migrate.ts`) tracks applied filenames in a `schema_migrations` table.
 - **Application-layer permissions live in `src/lib/server/permissions.ts`.** Do not add Postgres RLS policies — Primer does not use them and adding them complicates upgrades. The role × hierarchy authorization matrix is the canonical entry point for access decisions.
 - **Demo data goes in `seeds/`.** Same idempotency model: `scripts/seed.ts` tracks applied filenames in `schema_seeds`.
@@ -145,18 +145,18 @@ This is the most-violated rule when AI assistants modify SvelteKit codebases. Ma
 
 ## Common customizations and where to do them
 
-| Customer request                | Touch                                                                                                  |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| Change the application name     | `app.name` key in every `src/lib/i18n/*.json`                                                          |
-| Replace the logo                | `static/logo.svg`, `static/logo.png`, `static/logo.webp`, `static/favicon.svg`                         |
-| Change brand colors             | `src/routes/layout.css` `@theme { ... }` block (Tailwind 4 theme tokens)                                |
-| Add a language                  | New file `src/lib/i18n/<code>.json`; register in `src/lib/i18n/index.ts`                                |
-| Disable a product feature       | Delete the route folder under `src/routes/app/`; remove nav entries; remove its i18n keys              |
-| Connect to existing Postgres    | Edit `DATABASE_URL` in `.env`                                                                          |
-| Wire a transactional email      | Replace the `console.log` lines in `src/routes/auth/{register,forgot-password,verify-email}/...` with your provider's SDK |
-| Add an SSO provider             | Replace `src/lib/server/auth/` with provider SDK; preserve the `validateSession()` shape used by hooks |
-| Add a custom report or export   | New route under `src/routes/app/reports/`; new SQL query in the loader                                  |
-| Regenerate the SBOM             | `npm run sbom` — writes `docs/sbom.csv` from `package-lock.json`. Re-run when dependencies change.       |
+| Customer request              | Touch                                                                                                                     |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Change the application name   | `app.name` key in every `src/lib/i18n/*.json`                                                                             |
+| Replace the logo              | `static/logo.svg`, `static/logo.png`, `static/logo.webp`, `static/favicon.svg`                                            |
+| Change brand colors           | `src/routes/layout.css` `@theme { ... }` block (Tailwind 4 theme tokens)                                                  |
+| Add a language                | New file `src/lib/i18n/<code>.json`; register in `src/lib/i18n/index.ts`                                                  |
+| Disable a product feature     | Delete the route folder under `src/routes/app/`; remove nav entries; remove its i18n keys                                 |
+| Connect to existing Postgres  | Edit `DATABASE_URL` in `.env`                                                                                             |
+| Wire a transactional email    | Replace the `console.log` lines in `src/routes/auth/{register,forgot-password,verify-email}/...` with your provider's SDK |
+| Add an SSO provider           | Replace `src/lib/server/auth/` with provider SDK; preserve the `validateSession()` shape used by hooks                    |
+| Add a custom report or export | New route under `src/routes/app/reports/`; new SQL query in the loader                                                    |
+| Regenerate the SBOM           | `npm run sbom` — writes `docs/sbom.csv` from `package-lock.json`. Re-run when dependencies change.                        |
 
 ---
 

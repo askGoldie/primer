@@ -13,7 +13,7 @@
  * strongly-typed `resolve('/static/path')` for literal paths that the router
  * knows about.
  */
-import { resolve } from '$app/paths';
+import { resolve } from "$app/paths";
 
 type ResolveFn = (path: string) => string;
 

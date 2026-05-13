@@ -9,22 +9,22 @@
  * Phase 4 will add a real UI; for now we send users to /auth/login.
  */
 
-import { redirect } from '@sveltejs/kit';
-import type { PageServerLoad } from './$types.js';
-import { verifyEmailToken } from '$lib/server/auth/index.js';
+import { redirect } from "@sveltejs/kit";
+import type { PageServerLoad } from "./$types.js";
+import { verifyEmailToken } from "$lib/server/auth/index.js";
 
 export const load: PageServerLoad = async ({ url }) => {
-	const token = url.searchParams.get('token');
-	const redirectTo = url.searchParams.get('redirect') || '/app';
+  const token = url.searchParams.get("token");
+  const redirectTo = url.searchParams.get("redirect") || "/app";
 
-	if (token) {
-		const verification = await verifyEmailToken(token);
-		if (verification) {
-			redirect(302, redirectTo);
-		}
-		// Token invalid/expired — fall through to login with an error hint
-		redirect(302, `/auth/login?verify=expired`);
-	}
+  if (token) {
+    const verification = await verifyEmailToken(token);
+    if (verification) {
+      redirect(302, redirectTo);
+    }
+    // Token invalid/expired — fall through to login with an error hint
+    redirect(302, `/auth/login?verify=expired`);
+  }
 
-	redirect(302, `/auth/login${url.search}`);
+  redirect(302, `/auth/login${url.search}`);
 };

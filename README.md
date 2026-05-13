@@ -45,8 +45,8 @@ You need a computer (laptop or server) and a database. That's it.
 
 - **Option B users:** A Postgres database is included in the Docker setup. You don't need to install Postgres separately.
 - **Option A users:** You need a Postgres database somewhere. Options:
-    - On your own laptop: `brew install postgresql@15` (Mac), `apt install postgresql-15` (Ubuntu), or download the installer from [postgresql.org](https://www.postgresql.org/download/) (Windows).
-    - Hosted: Neon, Railway, AWS RDS, Google Cloud SQL, Azure, Supabase — any service that gives you a Postgres connection string.
+  - On your own laptop: `brew install postgresql@15` (Mac), `apt install postgresql-15` (Ubuntu), or download the installer from [postgresql.org](https://www.postgresql.org/download/) (Windows).
+  - Hosted: Neon, Railway, AWS RDS, Google Cloud SQL, Azure, Supabase — any service that gives you a Postgres connection string.
 
 ### Nothing else.
 
@@ -164,8 +164,8 @@ Stop the server with `Ctrl+C`. To run it again later: `node build`.
 For a real deployment (not just evaluation):
 
 - **Use a process manager** so the app restarts on crash and on reboot:
-    - `systemd`: write a unit file with `ExecStart=/usr/bin/node build` and `Restart=always`.
-    - `pm2`: `npm install -g pm2 && pm2 start build/index.js --name primer`.
+  - `systemd`: write a unit file with `ExecStart=/usr/bin/node build` and `Restart=always`.
+  - `pm2`: `npm install -g pm2 && pm2 start build/index.js --name primer`.
 - **Put it behind a reverse proxy** for HTTPS: nginx, Caddy, or Apache. Caddy auto-issues Let's Encrypt certs.
 - **Don't seed production.** Skip `npm run seed`, or run it once on a staging environment and never against real customer data.
 - **Back up the database** with `pg_dump`. See [Backups](#backups) below.

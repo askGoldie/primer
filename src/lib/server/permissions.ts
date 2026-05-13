@@ -22,8 +22,8 @@
  * but cannot approve metrics, manage other nodes, or capture snapshots.
  */
 
-import { sql, maybeOne } from '$lib/server/db.js';
-import type { OrgRole } from '$lib/types/index.js';
+import { sql, maybeOne } from "$lib/server/db.js";
+import type { OrgRole } from "$lib/types/index.js";
 
 // ============================================================================
 // Role Checks
@@ -36,7 +36,7 @@ import type { OrgRole } from '$lib/types/index.js';
  * hr_admin explicitly excluded — HR doesn't change org settings.
  */
 export function canManageOrgSettings(role: OrgRole): boolean {
-	return role === 'owner' || role === 'system_admin';
+  return role === "owner" || role === "system_admin";
 }
 
 /**
@@ -46,7 +46,7 @@ export function canManageOrgSettings(role: OrgRole): boolean {
  * @see canAssignMemberRoles for scoped role assignment (hr_admin).
  */
 export function canAssignRoles(role: OrgRole): boolean {
-	return role === 'owner';
+  return role === "owner";
 }
 
 /**
@@ -59,19 +59,26 @@ export function canAssignRoles(role: OrgRole): boolean {
  * @param assignerRole - The role of the user performing the assignment
  * @param targetRole - The role being assigned to the target user
  */
-export function canAssignMemberRoles(assignerRole: OrgRole, targetRole: OrgRole): boolean {
-	if (assignerRole === 'owner') return true;
-	if (assignerRole === 'hr_admin') {
-		return targetRole === 'editor' || targetRole === 'viewer' || targetRole === 'participant';
-	}
-	return false;
+export function canAssignMemberRoles(
+  assignerRole: OrgRole,
+  targetRole: OrgRole,
+): boolean {
+  if (assignerRole === "owner") return true;
+  if (assignerRole === "hr_admin") {
+    return (
+      targetRole === "editor" ||
+      targetRole === "viewer" ||
+      targetRole === "participant"
+    );
+  }
+  return false;
 }
 
 /**
  * Whether the role can manage members (invite, deactivate, place in hierarchy).
  */
 export function canManageMembers(role: OrgRole): boolean {
-	return role === 'owner' || role === 'hr_admin';
+  return role === "owner" || role === "hr_admin";
 }
 
 /**
@@ -81,7 +88,7 @@ export function canManageMembers(role: OrgRole): boolean {
  * executive-level decision, not a general management function.
  */
 export function canManageVisibility(role: OrgRole): boolean {
-	return role === 'owner' || role === 'system_admin' || role === 'hr_admin';
+  return role === "owner" || role === "system_admin" || role === "hr_admin";
 }
 
 /**
@@ -90,7 +97,7 @@ export function canManageVisibility(role: OrgRole): boolean {
  * hr_admin included — HR needs org-wide inquiry visibility.
  */
 export function canViewAllInquiries(role: OrgRole): boolean {
-	return role === 'owner' || role === 'system_admin' || role === 'hr_admin';
+  return role === "owner" || role === "system_admin" || role === "hr_admin";
 }
 
 /**
@@ -100,7 +107,7 @@ export function canViewAllInquiries(role: OrgRole): boolean {
  * operational disputes.
  */
 export function canResolveAnyInquiry(role: OrgRole): boolean {
-	return role === 'system_admin';
+  return role === "system_admin";
 }
 
 /**
@@ -111,7 +118,7 @@ export function canResolveAnyInquiry(role: OrgRole): boolean {
  * for metric/snapshot operations.
  */
 export function hasOrgWideManagement(role: OrgRole): boolean {
-	return role === 'system_admin';
+  return role === "system_admin";
 }
 
 /**
@@ -120,7 +127,7 @@ export function hasOrgWideManagement(role: OrgRole): boolean {
  * only system_admin and owners (who are also ancestors) can.
  */
 export function canAdjustSnapshots(role: OrgRole): boolean {
-	return role === 'owner' || role === 'system_admin';
+  return role === "owner" || role === "system_admin";
 }
 
 /**
@@ -130,20 +137,20 @@ export function canAdjustSnapshots(role: OrgRole): boolean {
  * Participant and above can self-serve. Viewers cannot.
  */
 export function canSelfServe(role: OrgRole): boolean {
-	return (
-		role === 'owner' ||
-		role === 'system_admin' ||
-		role === 'hr_admin' ||
-		role === 'editor' ||
-		role === 'participant'
-	);
+  return (
+    role === "owner" ||
+    role === "system_admin" ||
+    role === "hr_admin" ||
+    role === "editor" ||
+    role === "participant"
+  );
 }
 
 /**
  * Whether the role can export compliance reports (audit log, bulk cross-node data).
  */
 export function canExportComplianceReports(role: OrgRole): boolean {
-	return role === 'owner' || role === 'system_admin' || role === 'hr_admin';
+  return role === "owner" || role === "system_admin" || role === "hr_admin";
 }
 
 // ============================================================================
@@ -155,20 +162,20 @@ export function canExportComplianceReports(role: OrgRole): boolean {
  * Returns all ancestor IDs in order from immediate parent → root.
  */
 export async function getAncestorIds(nodeId: string): Promise<string[]> {
-	const ancestors: string[] = [];
-	let currentId: string | null = nodeId;
+  const ancestors: string[] = [];
+  let currentId: string | null = nodeId;
 
-	while (currentId) {
-		const row: { parent_id: string | null } | null = await maybeOne(sql`
+  while (currentId) {
+    const row: { parent_id: string | null } | null = await maybeOne(sql`
 			select parent_id from org_hierarchy_nodes where id = ${currentId}
 		`);
 
-		if (!row?.parent_id) break;
-		ancestors.push(row.parent_id);
-		currentId = row.parent_id;
-	}
+    if (!row?.parent_id) break;
+    ancestors.push(row.parent_id);
+    currentId = row.parent_id;
+  }
 
-	return ancestors;
+  return ancestors;
 }
 
 /**
@@ -176,17 +183,17 @@ export async function getAncestorIds(nodeId: string): Promise<string[]> {
  * Returns null if the user has no node or no membership.
  */
 export async function getUserContext(userId: string): Promise<{
-	nodeId: string;
-	organizationId: string;
-	role: OrgRole;
+  nodeId: string;
+  organizationId: string;
+  role: OrgRole;
 } | null> {
-	const node = await maybeOne<{ id: string; organization_id: string }>(sql`
+  const node = await maybeOne<{ id: string; organization_id: string }>(sql`
 		select id, organization_id from org_hierarchy_nodes where user_id = ${userId} limit 1
 	`);
 
-	if (!node) return null;
+  if (!node) return null;
 
-	const membership = await maybeOne<{ role: OrgRole }>(sql`
+  const membership = await maybeOne<{ role: OrgRole }>(sql`
 		select role from org_members
 		where user_id = ${userId}
 			and organization_id = ${node.organization_id}
@@ -194,13 +201,13 @@ export async function getUserContext(userId: string): Promise<{
 		limit 1
 	`);
 
-	if (!membership) return null;
+  if (!membership) return null;
 
-	return {
-		nodeId: node.id,
-		organizationId: node.organization_id,
-		role: membership.role
-	};
+  return {
+    nodeId: node.id,
+    organizationId: node.organization_id,
+    role: membership.role,
+  };
 }
 
 /**
@@ -216,26 +223,26 @@ export async function getUserContext(userId: string): Promise<{
  * @returns The user's context (nodeId, orgId, role) or null if denied
  */
 export async function verifyManagementAccess(
-	userId: string,
-	targetNodeId: string
+  userId: string,
+  targetNodeId: string,
 ): Promise<{
-	nodeId: string;
-	organizationId: string;
-	role: OrgRole;
+  nodeId: string;
+  organizationId: string;
+  role: OrgRole;
 } | null> {
-	const ctx = await getUserContext(userId);
-	if (!ctx) return null;
+  const ctx = await getUserContext(userId);
+  if (!ctx) return null;
 
-	// System admins bypass hierarchy checks
-	if (hasOrgWideManagement(ctx.role)) {
-		return ctx;
-	}
+  // System admins bypass hierarchy checks
+  if (hasOrgWideManagement(ctx.role)) {
+    return ctx;
+  }
 
-	// Otherwise, must be an ancestor in the hierarchy
-	const ancestors = await getAncestorIds(targetNodeId);
-	if (!ancestors.includes(ctx.nodeId)) return null;
+  // Otherwise, must be an ancestor in the hierarchy
+  const ancestors = await getAncestorIds(targetNodeId);
+  if (!ancestors.includes(ctx.nodeId)) return null;
 
-	return ctx;
+  return ctx;
 }
 
 /**
@@ -250,26 +257,26 @@ export async function verifyManagementAccess(
  * adjustment power is reserved for owner/system_admin per the matrix.
  */
 export async function verifySnapshotAdjustAccess(
-	userId: string,
-	targetNodeId: string
+  userId: string,
+  targetNodeId: string,
 ): Promise<{
-	nodeId: string;
-	organizationId: string;
-	role: OrgRole;
+  nodeId: string;
+  organizationId: string;
+  role: OrgRole;
 } | null> {
-	const ctx = await getUserContext(userId);
-	if (!ctx) return null;
+  const ctx = await getUserContext(userId);
+  if (!ctx) return null;
 
-	// System admins can adjust any snapshot
-	if (hasOrgWideManagement(ctx.role)) {
-		return ctx;
-	}
+  // System admins can adjust any snapshot
+  if (hasOrgWideManagement(ctx.role)) {
+    return ctx;
+  }
 
-	// Must be an ancestor AND have owner role
-	if (!canAdjustSnapshots(ctx.role)) return null;
+  // Must be an ancestor AND have owner role
+  if (!canAdjustSnapshots(ctx.role)) return null;
 
-	const ancestors = await getAncestorIds(targetNodeId);
-	if (!ancestors.includes(ctx.nodeId)) return null;
+  const ancestors = await getAncestorIds(targetNodeId);
+  if (!ancestors.includes(ctx.nodeId)) return null;
 
-	return ctx;
+  return ctx;
 }

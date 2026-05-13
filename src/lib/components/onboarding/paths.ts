@@ -44,40 +44,40 @@
 
 /** A single step inside an onboarding path. */
 export interface OnboardingStep {
-	/** i18n key for the step heading */
-	titleKey: string;
-	/** i18n key for the step body copy */
-	bodyKey: string;
-	/**
-	 * Optional call-to-action that deep-links into the app
-	 * (e.g. `/app/goals`). When set, the step renders a button
-	 * that navigates there after the user finishes reading.
-	 */
-	ctaHref?: string;
-	/** i18n key for the CTA button label. Required if ctaHref is set. */
-	ctaLabelKey?: string;
+  /** i18n key for the step heading */
+  titleKey: string;
+  /** i18n key for the step body copy */
+  bodyKey: string;
+  /**
+   * Optional call-to-action that deep-links into the app
+   * (e.g. `/app/goals`). When set, the step renders a button
+   * that navigates there after the user finishes reading.
+   */
+  ctaHref?: string;
+  /** i18n key for the CTA button label. Required if ctaHref is set. */
+  ctaLabelKey?: string;
 }
 
 /** A full onboarding path, displayed as a card on the landing view. */
 export interface OnboardingPath {
-	/** Stable identifier used as a svelte `{#each}` key */
-	id: 'scratch' | 'tried-before' | 'customize';
-	/** i18n key for the path title shown on the selector card */
-	titleKey: string;
-	/** i18n key for the one-sentence description on the selector card */
-	descriptionKey: string;
-	/** i18n key for the selector card CTA button */
-	ctaKey: string;
-	/** i18n key for the duration + outcome hint (e.g. "~15 min · ends with drafted metrics") */
-	durationKey: string;
-	/** Steps the user walks through once they enter the path */
-	steps: OnboardingStep[];
-	/**
-	 * Tailwind accent class used to tint the selector card. Keeping this
-	 * in data (rather than inside the component) lets customers re-theme
-	 * each path without editing Svelte.
-	 */
-	accentClass: string;
+  /** Stable identifier used as a svelte `{#each}` key */
+  id: "scratch" | "tried-before" | "customize";
+  /** i18n key for the path title shown on the selector card */
+  titleKey: string;
+  /** i18n key for the one-sentence description on the selector card */
+  descriptionKey: string;
+  /** i18n key for the selector card CTA button */
+  ctaKey: string;
+  /** i18n key for the duration + outcome hint (e.g. "~15 min · ends with drafted metrics") */
+  durationKey: string;
+  /** Steps the user walks through once they enter the path */
+  steps: OnboardingStep[];
+  /**
+   * Tailwind accent class used to tint the selector card. Keeping this
+   * in data (rather than inside the component) lets customers re-theme
+   * each path without editing Svelte.
+   */
+  accentClass: string;
 }
 
 /**
@@ -89,34 +89,34 @@ export interface OnboardingPath {
  * starter templates are all drafts the user is meant to edit.
  */
 const scratchPath: OnboardingPath = {
-	id: 'scratch',
-	titleKey: 'onboarding.path1.title',
-	descriptionKey: 'onboarding.path1.description',
-	ctaKey: 'onboarding.path1.cta',
-	durationKey: 'onboarding.path1.duration',
-	accentClass: 'border-accent1/40 bg-accent1/5',
-	steps: [
-		{
-			titleKey: 'onboarding.path1.step1.title',
-			bodyKey: 'onboarding.path1.step1.body'
-		},
-		{
-			titleKey: 'onboarding.path1.step2.title',
-			bodyKey: 'onboarding.path1.step2.body',
-			ctaHref: '/app/settings',
-			ctaLabelKey: 'onboarding.path1.step2.cta'
-		},
-		{
-			titleKey: 'onboarding.path1.step3.title',
-			bodyKey: 'onboarding.path1.step3.body',
-			ctaHref: '/app/goals',
-			ctaLabelKey: 'onboarding.path1.step3.cta'
-		},
-		{
-			titleKey: 'onboarding.path1.step4.title',
-			bodyKey: 'onboarding.path1.step4.body'
-		}
-	]
+  id: "scratch",
+  titleKey: "onboarding.path1.title",
+  descriptionKey: "onboarding.path1.description",
+  ctaKey: "onboarding.path1.cta",
+  durationKey: "onboarding.path1.duration",
+  accentClass: "border-accent1/40 bg-accent1/5",
+  steps: [
+    {
+      titleKey: "onboarding.path1.step1.title",
+      bodyKey: "onboarding.path1.step1.body",
+    },
+    {
+      titleKey: "onboarding.path1.step2.title",
+      bodyKey: "onboarding.path1.step2.body",
+      ctaHref: "/app/settings",
+      ctaLabelKey: "onboarding.path1.step2.cta",
+    },
+    {
+      titleKey: "onboarding.path1.step3.title",
+      bodyKey: "onboarding.path1.step3.body",
+      ctaHref: "/app/goals",
+      ctaLabelKey: "onboarding.path1.step3.cta",
+    },
+    {
+      titleKey: "onboarding.path1.step4.title",
+      bodyKey: "onboarding.path1.step4.body",
+    },
+  ],
 };
 
 /**
@@ -129,32 +129,32 @@ const scratchPath: OnboardingPath = {
  * Ends with a deletion exercise and a 30-day plan.
  */
 const triedBeforePath: OnboardingPath = {
-	id: 'tried-before',
-	titleKey: 'onboarding.path2.title',
-	descriptionKey: 'onboarding.path2.description',
-	ctaKey: 'onboarding.path2.cta',
-	durationKey: 'onboarding.path2.duration',
-	accentClass: 'border-amber-500/40 bg-amber-500/5',
-	steps: [
-		{
-			titleKey: 'onboarding.path2.step1.title',
-			bodyKey: 'onboarding.path2.step1.body'
-		},
-		{
-			titleKey: 'onboarding.path2.step2.title',
-			bodyKey: 'onboarding.path2.step2.body'
-		},
-		{
-			titleKey: 'onboarding.path2.step3.title',
-			bodyKey: 'onboarding.path2.step3.body',
-			ctaHref: '/app/goals',
-			ctaLabelKey: 'onboarding.path2.step3.cta'
-		},
-		{
-			titleKey: 'onboarding.path2.step4.title',
-			bodyKey: 'onboarding.path2.step4.body'
-		}
-	]
+  id: "tried-before",
+  titleKey: "onboarding.path2.title",
+  descriptionKey: "onboarding.path2.description",
+  ctaKey: "onboarding.path2.cta",
+  durationKey: "onboarding.path2.duration",
+  accentClass: "border-amber-500/40 bg-amber-500/5",
+  steps: [
+    {
+      titleKey: "onboarding.path2.step1.title",
+      bodyKey: "onboarding.path2.step1.body",
+    },
+    {
+      titleKey: "onboarding.path2.step2.title",
+      bodyKey: "onboarding.path2.step2.body",
+    },
+    {
+      titleKey: "onboarding.path2.step3.title",
+      bodyKey: "onboarding.path2.step3.body",
+      ctaHref: "/app/goals",
+      ctaLabelKey: "onboarding.path2.step3.cta",
+    },
+    {
+      titleKey: "onboarding.path2.step4.title",
+      bodyKey: "onboarding.path2.step4.body",
+    },
+  ],
 };
 
 /**
@@ -167,39 +167,39 @@ const triedBeforePath: OnboardingPath = {
  * they can adapt for their leadership meeting.
  */
 const customizePath: OnboardingPath = {
-	id: 'customize',
-	titleKey: 'onboarding.path3.title',
-	descriptionKey: 'onboarding.path3.description',
-	ctaKey: 'onboarding.path3.cta',
-	durationKey: 'onboarding.path3.duration',
-	accentClass: 'border-emerald-500/40 bg-emerald-500/5',
-	steps: [
-		{
-			titleKey: 'onboarding.path3.step1.title',
-			bodyKey: 'onboarding.path3.step1.body'
-		},
-		{
-			titleKey: 'onboarding.path3.step2.title',
-			bodyKey: 'onboarding.path3.step2.body'
-		},
-		{
-			titleKey: 'onboarding.path3.step3.title',
-			bodyKey: 'onboarding.path3.step3.body',
-			ctaHref: '/app/settings',
-			ctaLabelKey: 'onboarding.path3.step3.cta'
-		},
-		{
-			titleKey: 'onboarding.path3.step4.title',
-			bodyKey: 'onboarding.path3.step4.body'
-		}
-	]
+  id: "customize",
+  titleKey: "onboarding.path3.title",
+  descriptionKey: "onboarding.path3.description",
+  ctaKey: "onboarding.path3.cta",
+  durationKey: "onboarding.path3.duration",
+  accentClass: "border-emerald-500/40 bg-emerald-500/5",
+  steps: [
+    {
+      titleKey: "onboarding.path3.step1.title",
+      bodyKey: "onboarding.path3.step1.body",
+    },
+    {
+      titleKey: "onboarding.path3.step2.title",
+      bodyKey: "onboarding.path3.step2.body",
+    },
+    {
+      titleKey: "onboarding.path3.step3.title",
+      bodyKey: "onboarding.path3.step3.body",
+      ctaHref: "/app/settings",
+      ctaLabelKey: "onboarding.path3.step3.cta",
+    },
+    {
+      titleKey: "onboarding.path3.step4.title",
+      bodyKey: "onboarding.path3.step4.body",
+    },
+  ],
 };
 
 /** Ordered list of all onboarding paths, consumed by the landing selector. */
 export const ONBOARDING_PATHS: readonly OnboardingPath[] = [
-	scratchPath,
-	triedBeforePath,
-	customizePath
+  scratchPath,
+  triedBeforePath,
+  customizePath,
 ];
 
 /**
@@ -211,10 +211,10 @@ export const ONBOARDING_PATHS: readonly OnboardingPath[] = [
  * on the completion screen in PathWalkthrough.
  */
 export const ROLLOUT_NEXT_STEP = {
-	titleKey: 'onboarding.rollout.title',
-	bodyKey: 'onboarding.rollout.body',
-	ctaHref: '/app/admin',
-	ctaLabelKey: 'onboarding.rollout.cta'
+  titleKey: "onboarding.rollout.title",
+  bodyKey: "onboarding.rollout.body",
+  ctaHref: "/app/admin",
+  ctaLabelKey: "onboarding.rollout.cta",
 } as const;
 
 /**
@@ -222,5 +222,5 @@ export const ROLLOUT_NEXT_STEP = {
  * can decide whether to fall back to the selector view or render a 404.
  */
 export function getOnboardingPath(id: string): OnboardingPath | undefined {
-	return ONBOARDING_PATHS.find((p) => p.id === id);
+  return ONBOARDING_PATHS.find((p) => p.id === id);
 }

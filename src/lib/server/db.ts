@@ -18,11 +18,11 @@
  * ```
  */
 
-import postgres from 'postgres';
-import { env } from '$env/dynamic/private';
+import postgres from "postgres";
+import { env } from "$env/dynamic/private";
 
 if (!env.DATABASE_URL) {
-	throw new Error('DATABASE_URL must be set.');
+  throw new Error("DATABASE_URL must be set.");
 }
 
 /**
@@ -35,34 +35,40 @@ if (!env.DATABASE_URL) {
  * ```
  */
 export const sql = postgres(env.DATABASE_URL, {
-	max: Number(env.DATABASE_POOL_MAX ?? 10),
-	idle_timeout: 30,
-	connect_timeout: 10,
-	ssl: env.DATABASE_SSL === 'require' ? 'require' : false,
-	prepare: true
+  max: Number(env.DATABASE_POOL_MAX ?? 10),
+  idle_timeout: 30,
+  connect_timeout: 10,
+  ssl: env.DATABASE_SSL === "require" ? "require" : false,
+  prepare: true,
 });
 
 /**
  * Run a query expected to return exactly one row. Throws if zero rows.
  */
-export async function one<T>(query: postgres.PendingQuery<postgres.Row[]>): Promise<T> {
-	const rows = await query;
-	if (rows.length === 0) throw new Error('Expected one row, got 0');
-	return rows[0] as unknown as T;
+export async function one<T>(
+  query: postgres.PendingQuery<postgres.Row[]>,
+): Promise<T> {
+  const rows = await query;
+  if (rows.length === 0) throw new Error("Expected one row, got 0");
+  return rows[0] as unknown as T;
 }
 
 /**
  * Run a query that may return zero or one row.
  */
-export async function maybeOne<T>(query: postgres.PendingQuery<postgres.Row[]>): Promise<T | null> {
-	const rows = await query;
-	return (rows[0] as unknown as T) ?? null;
+export async function maybeOne<T>(
+  query: postgres.PendingQuery<postgres.Row[]>,
+): Promise<T | null> {
+  const rows = await query;
+  return (rows[0] as unknown as T) ?? null;
 }
 
 /**
  * Run a query that returns a list of rows (zero or more).
  */
-export async function many<T>(query: postgres.PendingQuery<postgres.Row[]>): Promise<T[]> {
-	const rows = await query;
-	return rows as unknown as T[];
+export async function many<T>(
+  query: postgres.PendingQuery<postgres.Row[]>,
+): Promise<T[]> {
+  const rows = await query;
+  return rows as unknown as T[];
 }

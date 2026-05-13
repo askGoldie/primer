@@ -11,18 +11,18 @@
  * infrastructure components that don't have credentials.
  */
 
-import { json } from '@sveltejs/kit';
-import { sql } from '$lib/server/db.js';
-import type { RequestHandler } from './$types.js';
+import { json } from "@sveltejs/kit";
+import { sql } from "$lib/server/db.js";
+import type { RequestHandler } from "./$types.js";
 
 export const GET: RequestHandler = async () => {
-	try {
-		await sql`select 1`;
-		return json({ status: 'ok', db: 'ok' });
-	} catch (err) {
-		return json(
-			{ status: 'degraded', db: 'unreachable', error: String(err) },
-			{ status: 503 }
-		);
-	}
+  try {
+    await sql`select 1`;
+    return json({ status: "ok", db: "ok" });
+  } catch (err) {
+    return json(
+      { status: "degraded", db: "unreachable", error: String(err) },
+      { status: 503 },
+    );
+  }
 };
