@@ -28,6 +28,7 @@ services:
       DATABASE_SSL: disable
       PORT: 3000
       PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://localhost}
+      ORIGIN: ${PUBLIC_APP_URL:-http://localhost}
       PRIMER_SEED_ON_BOOT: ${PRIMER_SEED_ON_BOOT:-true}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]

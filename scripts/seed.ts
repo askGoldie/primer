@@ -56,7 +56,7 @@ const DEMO_EMAILS = [
   "james@demo.primer.company",
   "nina@demo.primer.company",
 ];
-const DEMO_PASSWORD = "demo2025";
+const DEMO_PASSWORD = "demo2026";
 
 function scryptAsync(password: string, salt: string): Promise<string> {
   return new Promise((resolve, reject) => {

@@ -168,13 +168,23 @@ export async function deleteAllUserSessions(userId: string): Promise<void> {
 }
 
 /**
+ * Whether to mark the session cookie `Secure`. Browsers reject Secure
+ * cookies sent over plain http, which breaks evaluation deployments on
+ * `http://localhost`. Inferred from `PUBLIC_APP_URL` so production
+ * (https) keeps Secure while local Docker Compose stays usable.
+ */
+const SECURE_COOKIES = (process.env.PUBLIC_APP_URL ?? "").startsWith(
+  "https://",
+);
+
+/**
  * Set session cookie
  */
 export function setSessionCookie(cookies: Cookies, sessionId: string): void {
   cookies.set(SESSION_COOKIE_NAME, sessionId, {
     path: "/",
     httpOnly: true,
-    secure: true,
+    secure: SECURE_COOKIES,
     sameSite: "lax",
     maxAge: SESSION_DURATION_MS / 1000,
   });

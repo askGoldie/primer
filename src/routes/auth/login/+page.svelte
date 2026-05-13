@@ -10,6 +10,7 @@
 	import type { PageData, ActionData } from './$types.js';
 	import { t } from '$lib/i18n/index.js';
 	import { enhance } from '$app/forms';
+	import EvaluationModePanel from './EvaluationModePanel.svelte';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 
@@ -27,6 +28,8 @@
 				<img src="/logo.svg" alt="Primer" class="h-10" />
 			</a>
 		</div>
+
+		<EvaluationModePanel />
 
 		<div class="rounded-lg border border-border bg-surfaceMid p-8">
 			<h1 class="text-2xl font-medium text-primary">

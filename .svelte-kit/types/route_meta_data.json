@@ -132,6 +132,9 @@
 		"src/routes/+layout.ts",
 		"src/routes/+layout.server.ts"
 	],
+	"/auth/demo-login": [
+		"src/routes/auth/demo-login/+server.ts"
+	],
 	"/auth/forgot-password": [
 		"src/routes/auth/forgot-password/+page.server.ts",
 		"src/routes/+layout.ts",

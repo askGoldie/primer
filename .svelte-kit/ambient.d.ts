@@ -38,6 +38,9 @@
  * The above values will be the same _even if_ different values for `ENVIRONMENT` or `PUBLIC_BASE_URL` are set at runtime, as they are statically replaced in your code with their build time values.
  */
 declare module '$env/static/private' {
+	export const NoDefaultCurrentDirectoryInExePath: string;
+	export const CLAUDE_EFFORT: string;
+	export const CLAUDE_CODE_ENTRYPOINT: string;
 	export const TERM_PROGRAM: string;
 	export const NODE: string;
 	export const INIT_CWD: string;
@@ -51,6 +54,8 @@ declare module '$env/static/private' {
 	export const TERM_SESSION_ID: string;
 	export const npm_config_noproxy: string;
 	export const npm_config_local_prefix: string;
+	export const GIT_EDITOR: string;
+	export const AI_AGENT: string;
 	export const USER: string;
 	export const COMMAND_MODE: string;
 	export const npm_config_globalconfig: string;
@@ -80,17 +85,21 @@ declare module '$env/static/private' {
 	export const SHLVL: string;
 	export const HOME: string;
 	export const COLORFGBG: string;
+	export const CLAUDE_CODE_EXECPATH: string;
 	export const LC_TERMINAL_VERSION: string;
 	export const HOMEBREW_PREFIX: string;
 	export const ITERM_SESSION_ID: string;
 	export const npm_config_cache: string;
 	export const LOGNAME: string;
 	export const npm_lifecycle_script: string;
+	export const COREPACK_ENABLE_AUTO_PIN: string;
 	export const npm_config_user_agent: string;
+	export const CLAUDE_CODE_SESSION_ID: string;
 	export const INFOPATH: string;
 	export const HOMEBREW_CELLAR: string;
 	export const LC_TERMINAL: string;
 	export const OSLogRateLimit: string;
+	export const CLAUDECODE: string;
 	export const npm_node_execpath: string;
 	export const npm_config_prefix: string;
 	export const COLORTERM: string;
@@ -180,6 +189,9 @@ declare module '$env/static/public' {
  */
 declare module '$env/dynamic/private' {
 	export const env: {
+		NoDefaultCurrentDirectoryInExePath: string;
+		CLAUDE_EFFORT: string;
+		CLAUDE_CODE_ENTRYPOINT: string;
 		TERM_PROGRAM: string;
 		NODE: string;
 		INIT_CWD: string;
@@ -193,6 +205,8 @@ declare module '$env/dynamic/private' {
 		TERM_SESSION_ID: string;
 		npm_config_noproxy: string;
 		npm_config_local_prefix: string;
+		GIT_EDITOR: string;
+		AI_AGENT: string;
 		USER: string;
 		COMMAND_MODE: string;
 		npm_config_globalconfig: string;
@@ -222,17 +236,21 @@ declare module '$env/dynamic/private' {
 		SHLVL: string;
 		HOME: string;
 		COLORFGBG: string;
+		CLAUDE_CODE_EXECPATH: string;
 		LC_TERMINAL_VERSION: string;
 		HOMEBREW_PREFIX: string;
 		ITERM_SESSION_ID: string;
 		npm_config_cache: string;
 		LOGNAME: string;
 		npm_lifecycle_script: string;
+		COREPACK_ENABLE_AUTO_PIN: string;
 		npm_config_user_agent: string;
+		CLAUDE_CODE_SESSION_ID: string;
 		INFOPATH: string;
 		HOMEBREW_CELLAR: string;
 		LC_TERMINAL: string;
 		OSLogRateLimit: string;
+		CLAUDECODE: string;
 		npm_node_execpath: string;
 		npm_config_prefix: string;
 		COLORTERM: string;

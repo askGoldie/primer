@@ -152,7 +152,7 @@ The last command stays running. Open a browser to **http://localhost:3000**.
 If you ran `npm run seed`, log in with the seeded demo account. The seed script prints the credentials at the end of its run:
 
 ```
-set demo password on 5 user(s) — login: demo@primer.company / demo2025
+set demo password on 5 user(s) — login: demo@primer.company / demo2026
 ```
 
 That's the shared password for all five Meridian Construction demo users (Hans, Marcus, Rachel, James, Nina). Their email addresses are listed in `seeds/02_users.sql`.
@@ -215,7 +215,7 @@ Same as Option A. The seeded credentials are printed in the app container's logs
 docker compose logs app | grep "login:"
 ```
 
-You'll see `login: demo@primer.company / demo2025`.
+You'll see `login: demo@primer.company / demo2026`.
 
 ### Common Option B commands
 
