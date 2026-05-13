@@ -289,7 +289,7 @@ export const load: PageServerLoad = async ({ parent }) => {
       visibility: string;
       created_at: string;
     }
-    let grantsRaw: GrantRow[] = [];
+    let grantsRaw: GrantRow[];
     if (userNode) {
       const userNodeRow = await maybeOne<{ user_id: string | null }>(sql`
 				select user_id from org_hierarchy_nodes where id = ${userNode.id}
