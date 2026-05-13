@@ -22,16 +22,16 @@
  * from regular users.
  */
 
-import { redirect } from '@sveltejs/kit';
-import type { PageServerLoad } from './$types.js';
+import { redirect } from "@sveltejs/kit";
+import type { PageServerLoad } from "./$types.js";
 
 export const load = async ({ parent }: Parameters<PageServerLoad>[0]) => {
-	const { isSystemAdmin } = await parent();
+  const { isSystemAdmin } = await parent();
 
-	if (!isSystemAdmin) {
-		redirect(302, '/app');
-	}
+  if (!isSystemAdmin) {
+    redirect(302, "/app");
+  }
 
-	// No additional data needed — path content is static and lives in i18n.
-	return {};
+  // No additional data needed — path content is static and lives in i18n.
+  return {};
 };

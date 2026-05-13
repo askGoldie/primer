@@ -39,6 +39,7 @@
  */
 declare module '$env/static/private' {
 	export const NoDefaultCurrentDirectoryInExePath: string;
+	export const CLAUDE_EFFORT: string;
 	export const CLAUDE_CODE_ENTRYPOINT: string;
 	export const TERM_PROGRAM: string;
 	export const NODE: string;
@@ -93,6 +94,7 @@ declare module '$env/static/private' {
 	export const npm_lifecycle_script: string;
 	export const COREPACK_ENABLE_AUTO_PIN: string;
 	export const npm_config_user_agent: string;
+	export const CLAUDE_CODE_SESSION_ID: string;
 	export const INFOPATH: string;
 	export const HOMEBREW_CELLAR: string;
 	export const LC_TERMINAL: string;
@@ -188,6 +190,7 @@ declare module '$env/static/public' {
 declare module '$env/dynamic/private' {
 	export const env: {
 		NoDefaultCurrentDirectoryInExePath: string;
+		CLAUDE_EFFORT: string;
 		CLAUDE_CODE_ENTRYPOINT: string;
 		TERM_PROGRAM: string;
 		NODE: string;
@@ -242,6 +245,7 @@ declare module '$env/dynamic/private' {
 		npm_lifecycle_script: string;
 		COREPACK_ENABLE_AUTO_PIN: string;
 		npm_config_user_agent: string;
+		CLAUDE_CODE_SESSION_ID: string;
 		INFOPATH: string;
 		HOMEBREW_CELLAR: string;
 		LC_TERMINAL: string;

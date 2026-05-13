@@ -6,35 +6,36 @@
  * Core mechanism for challenging thresholds and weights.
  */
 
-import type { PageServerLoad } from './$types.js';
-import { sql, many } from '$lib/server/db.js';
+import type { PageServerLoad } from "./$types.js";
+import { sql, many } from "$lib/server/db.js";
 
 interface InquiryRow {
-	id: string;
-	inquiry_type: string;
-	status: string;
-	challenge_type: string;
-	rationale: string;
-	resolution_summary: string | null;
-	resolution_action: string | null;
-	filed_at: string;
-	resolved_at: string | null;
-	metric_id: string | null;
-	metric_name: string | null;
-	filed_by_id: string | null;
-	filed_by_name: string | null;
-	filed_by_node_id: string | null;
-	filed_by_node_name: string | null;
-	filed_by_node_title: string | null;
+  id: string;
+  inquiry_type: string;
+  status: string;
+  challenge_type: string;
+  rationale: string;
+  resolution_summary: string | null;
+  resolution_action: string | null;
+  filed_at: string;
+  resolved_at: string | null;
+  metric_id: string | null;
+  metric_name: string | null;
+  filed_by_id: string | null;
+  filed_by_name: string | null;
+  filed_by_node_id: string | null;
+  filed_by_node_name: string | null;
+  filed_by_node_title: string | null;
 }
 
 export const load = async ({ parent, locals }: Parameters<PageServerLoad>[0]) => {
-	const { organization, userNode, membership } = await parent();
+  const { organization, userNode, membership } = await parent();
 
-	const isPrivileged = membership.role === 'owner' || membership.role === 'system_admin';
-	const userId = locals.user!.id;
+  const isPrivileged =
+    membership.role === "owner" || membership.role === "system_admin";
+  const userId = locals.user!.id;
 
-	const allInquiries = await many<InquiryRow>(sql`
+  const allInquiries = await many<InquiryRow>(sql`
 		select
 			i.id,
 			i.inquiry_type,
@@ -62,31 +63,31 @@ export const load = async ({ parent, locals }: Parameters<PageServerLoad>[0]) =>
 		limit 50
 	`);
 
-	return {
-		inquiries: allInquiries.map((row) => ({
-			id: row.id,
-			type: row.inquiry_type,
-			status: row.status,
-			challengeType: row.challenge_type,
-			rationale: row.rationale,
-			resolutionSummary: row.resolution_summary,
-			resolutionAction: row.resolution_action,
-			filedAt: row.filed_at,
-			resolvedAt: row.resolved_at,
-			targetMetric: {
-				id: row.metric_id,
-				name: row.metric_name
-			},
-			filedBy: {
-				id: row.filed_by_id,
-				name: row.filed_by_name
-			},
-			filedByNode: {
-				id: row.filed_by_node_id,
-				name: row.filed_by_node_name,
-				title: row.filed_by_node_title
-			}
-		})),
-		canFileInquiry: !!userNode
-	};
+  return {
+    inquiries: allInquiries.map((row) => ({
+      id: row.id,
+      type: row.inquiry_type,
+      status: row.status,
+      challengeType: row.challenge_type,
+      rationale: row.rationale,
+      resolutionSummary: row.resolution_summary,
+      resolutionAction: row.resolution_action,
+      filedAt: row.filed_at,
+      resolvedAt: row.resolved_at,
+      targetMetric: {
+        id: row.metric_id,
+        name: row.metric_name,
+      },
+      filedBy: {
+        id: row.filed_by_id,
+        name: row.filed_by_name,
+      },
+      filedByNode: {
+        id: row.filed_by_node_id,
+        name: row.filed_by_node_name,
+        title: row.filed_by_node_title,
+      },
+    })),
+    canFileInquiry: !!userNode,
+  };
 };

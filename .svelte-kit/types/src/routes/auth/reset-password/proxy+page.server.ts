@@ -11,48 +11,52 @@
  * /auth/login (the form would need to know the token).
  */
 
-import { fail, redirect } from '@sveltejs/kit';
-import type { Actions, PageServerLoad } from './$types.js';
+import { fail, redirect } from "@sveltejs/kit";
+import type { Actions, PageServerLoad } from "./$types.js";
 import {
-	completePasswordReset,
-	validatePassword,
-	MIN_PASSWORD_LENGTH
-} from '$lib/server/auth/index.js';
+  completePasswordReset,
+  validatePassword,
+  MIN_PASSWORD_LENGTH,
+} from "$lib/server/auth/index.js";
 
 export const load = async ({ url }: Parameters<PageServerLoad>[0]) => {
-	redirect(302, `/auth/login${url.search}`);
+  redirect(302, `/auth/login${url.search}`);
 };
 
 export const actions = {
-	default: async ({ request, url }: import('./$types').RequestEvent) => {
-		const formData = await request.formData();
-		const token = formData.get('token')?.toString() || url.searchParams.get('token');
-		const password = formData.get('password')?.toString();
-		const confirmPassword = formData.get('confirmPassword')?.toString();
+  default: async ({ request, url }: import('./$types').RequestEvent) => {
+    const formData = await request.formData();
+    const token =
+      formData.get("token")?.toString() || url.searchParams.get("token");
+    const password = formData.get("password")?.toString();
+    const confirmPassword = formData.get("confirmPassword")?.toString();
 
-		if (!token) {
-			return fail(400, { error: 'auth.verification_expired' });
-		}
+    if (!token) {
+      return fail(400, { error: "auth.verification_expired" });
+    }
 
-		if (!password) {
-			return fail(400, { error: 'validation.field_required' });
-		}
+    if (!password) {
+      return fail(400, { error: "validation.field_required" });
+    }
 
-		const passwordCheck = validatePassword(password);
-		if (!passwordCheck.valid) {
-			return fail(400, { error: 'validation.password_min', minLength: MIN_PASSWORD_LENGTH });
-		}
+    const passwordCheck = validatePassword(password);
+    if (!passwordCheck.valid) {
+      return fail(400, {
+        error: "validation.password_min",
+        minLength: MIN_PASSWORD_LENGTH,
+      });
+    }
 
-		if (password !== confirmPassword) {
-			return fail(400, { error: 'validation.password_match' });
-		}
+    if (password !== confirmPassword) {
+      return fail(400, { error: "validation.password_match" });
+    }
 
-		const ok = await completePasswordReset(token, password);
-		if (!ok) {
-			return fail(400, { error: 'auth.verification_expired' });
-		}
+    const ok = await completePasswordReset(token, password);
+    if (!ok) {
+      return fail(400, { error: "auth.verification_expired" });
+    }
 
-		redirect(302, '/auth/login?reset=success');
-	}
+    redirect(302, "/auth/login?reset=success");
+  },
 };
 ;null as any as Actions;

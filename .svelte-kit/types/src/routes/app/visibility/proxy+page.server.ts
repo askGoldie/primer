@@ -7,10 +7,10 @@
  * or direct links continue to work.
  */
 
-import { redirect } from '@sveltejs/kit';
-import type { PageServerLoad } from './$types.js';
+import { redirect } from "@sveltejs/kit";
+import type { PageServerLoad } from "./$types.js";
 
 export const load = async () => {
-	redirect(302, '/app/settings');
+  redirect(302, "/app/settings");
 };
 ;null as any as PageServerLoad;

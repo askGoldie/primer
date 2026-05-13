@@ -7,10 +7,10 @@
  * or external links to the old standalone route.
  */
 
-import { redirect } from '@sveltejs/kit';
-import type { PageServerLoad } from './$types.js';
+import { redirect } from "@sveltejs/kit";
+import type { PageServerLoad } from "./$types.js";
 
 export const load = async () => {
-	redirect(301, '/app/goals');
+  redirect(301, "/app/goals");
 };
 ;null as any as PageServerLoad;

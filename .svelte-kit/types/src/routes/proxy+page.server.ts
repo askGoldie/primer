@@ -6,12 +6,12 @@
  * login screen otherwise.
  */
 
-import { redirect } from '@sveltejs/kit';
-import type { PageServerLoad } from './$types.js';
+import { redirect } from "@sveltejs/kit";
+import type { PageServerLoad } from "./$types.js";
 
 export const load = ({ locals }: Parameters<PageServerLoad>[0]) => {
-	if (locals.user) {
-		redirect(302, '/app');
-	}
-	redirect(302, '/auth/login');
+  if (locals.user) {
+    redirect(302, "/app");
+  }
+  redirect(302, "/auth/login");
 };
