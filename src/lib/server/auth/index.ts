@@ -6,7 +6,13 @@
  */
 
 import { sql, maybeOne } from "$lib/server/db.js";
-import { createHash, randomBytes, timingSafeEqual, scrypt } from "crypto";
+import {
+  createHash,
+  randomBytes,
+  randomUUID,
+  timingSafeEqual,
+  scrypt,
+} from "crypto";
 import type { Cookies } from "@sveltejs/kit";
 
 interface SessionRow {
@@ -116,10 +122,16 @@ export function hashToken(token: string): string {
 }
 
 /**
- * Create a new session for a user
+ * Create a new session for a user.
+ *
+ * The session id is a v4 UUID — `sessions.id` is declared `UUID` in the
+ * schema (`migrations/20260101000008_sessions.sql`), so the older 32-byte
+ * hex token from `generateToken()` would be rejected by Postgres on insert.
+ * UUID v4 still gives 122 bits of randomness, well past the threshold for
+ * an opaque session cookie.
  */
 export async function createSession(userId: string): Promise<string> {
-  const sessionId = generateToken();
+  const sessionId = randomUUID();
   const expiresAt = new Date(Date.now() + SESSION_DURATION_MS);
 
   await sql`
