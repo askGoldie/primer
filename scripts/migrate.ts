@@ -17,7 +17,15 @@ import postgres from "postgres";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, dirname, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
-import "dotenv/config";
+
+// dotenv is a dev-only convenience for loading .env when iterating locally.
+// It's pruned from the Docker runtime image (devDependencies), where env
+// vars are injected by Compose — so tolerate its absence.
+try {
+  await import("dotenv/config");
+} catch {
+  // not installed — env is expected to come from the host
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = resolvePath(__dirname, "..", "migrations");
