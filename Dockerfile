@@ -14,8 +14,15 @@ FROM node:20-alpine AS build
 WORKDIR /app
 
 # Install dependencies first so this layer caches across code-only changes.
+# The trailing `npm install --no-save` repairs platform-specific optional
+# dependencies (e.g. Rollup native binaries) that `npm ci` skips when the
+# build container's OS/arch differs from the host where package-lock.json
+# was generated — npm bug #4828. Without this, `npm run build` below fails
+# with "Cannot find module @rollup/rollup-linux-x64-gnu" (or the matching
+# binary for the customer's Docker host arch). `--no-save` keeps the
+# shipped lockfile unchanged.
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm ci && npm install --no-save --no-audit --no-fund
 
 # Build the app, then drop dev deps from node_modules.
 COPY . .
